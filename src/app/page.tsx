@@ -1,103 +1,138 @@
-import Image from "next/image";
+// src/app/page.tsx
+'use client';
+
+/**
+ * עמוד בית פשוט: ברכה + הסבר קצר + קישורי פעולה (עם אמוג'ים 😄)
+ * כולל באנר "בטא" בחלק העליון.
+ */
+
+import Link from 'next/link';
 
 export default function Home() {
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <section className="grid gap-6 sm:gap-8 max-w-3xl" dir="rtl">
+      {/* Beta Banner */}
+      <div className="rounded-lg border border-amber-300/60 bg-amber-500/10 text-amber-800 dark:text-amber-300 px-4 py-3 text-sm">
+        🚧 גרסת בטא: האתר בפיתוח פעיל — ייתכנו שינויים ותקלות. נשמח לשמוע מכם משוב!
+        {' '}
+        <Link href="/about" className="underline underline-offset-4 hover:opacity-90">
+          קראו עוד באודות
+        </Link>
+        .
+      </div>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+      <header className="space-y-2">
+        <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
+          ברוכים הבאים ל-GymTracker 💪
+        </h1>
+        <p className="text-base sm:text-lg text-gray-600 dark:text-gray-300">
+          יומן אימונים ותזונה פשוט ואמין — כדי להתמיד, לעקוב ולהרגיש בשליטה.
+        </p>
+      </header>
+
+      {/* קישורי פעולה מהירים */}
+      <div className="flex flex-col sm:flex-row flex-wrap gap-3">
+        <Link
+          href="/workouts/start"
+          className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 bg-foreground text-background hover:opacity-90"
         >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+          התחל/י אימון 🏋️
+        </Link>
+        <Link
+          href="/nutrition"
+          className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
         >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+          הוספת אכילה 🍽️
+        </Link>
+        <Link
+          href="/profile"
+          className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
         >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
+          עדכון פרופיל/מדידות 📏
+        </Link>
+        <Link
+          href="/equipment"
+          className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+        >
+          מכשירים 🧰
+        </Link>
+      </div>
+
+      {/* הסבר קצר על העמודים */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <FeatureCard
+          title="אימונים 🏋️"
+          href="/workouts/start"
+          points={[
+            'תיעוד אימון לפי תרגילים וסטים',
+            'שמירת משקלים וחזרות',
+            'מעקב אחר נפח וזמן אימון',
+          ]}
+        />
+        <FeatureCard
+          title="תזונה 🥗"
+          href="/nutrition"
+          points={[
+            'רישום ארוחות ומה אכלת בפועל',
+            'קלוריות וחלוקת מאקרו (חלבון/פחמימות/שומן)',
+            'אפשר להוסיף הערות לכל סעיף',
+          ]}
+        />
+        <FeatureCard
+          title="פרופיל ומדידות 📏"
+          href="/profile"
+          points={[
+            'פרטים אישיים והעדפות',
+            'מדידות היקפים/משקל לאורך זמן',
+            'יעדי חלבון/קלוריות לפי משקל/פעילות',
+          ]}
+        />
+        <FeatureCard
+          title="מכשירים 🧰"
+          href="/equipment"
+          points={[
+            'בחירת ציוד זמין עבורך',
+            'התאמת תרגילים לפי ציוד',
+            'ארגון לפי טאבים/קטגוריות',
+          ]}
+        />
+      </div>
+
+      <footer className="pt-2 text-xs text-gray-500 dark:text-gray-400">
+        טיפ: להתחלה מהירה — היכנס/י ל״אימונים״ לפתיחת אימון חדש, או ל״תזונה״ להוספת הארוחה הבאה. 🚀
       </footer>
-    </div>
+    </section>
+  );
+}
+
+function FeatureCard({
+  title,
+  href,
+  points,
+}: {
+  title: string;
+  href: string;
+  points: string[];
+}) {
+  return (
+    <section className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background">
+      <div className="p-4 md:p-5 border-b border-black/10 dark:border-white/10 flex items-center justify-between">
+        <h2 className="text-lg font-semibold">{title}</h2>
+        <Link
+          href={href}
+          className="text-sm underline underline-offset-4 opacity-80 hover:opacity-100"
+        >
+          מעבר לעמוד →
+        </Link>
+      </div>
+      <div className="p-4 md:p-5 text-sm space-y-1">
+        {points.map((p, i) => (
+          <div key={i} className="flex items-start gap-2">
+            <span className="mt-0.5">•</span>
+            <span>{p}</span>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

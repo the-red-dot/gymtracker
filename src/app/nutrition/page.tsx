@@ -1,0 +1,681 @@
+// gym-tracker-app/src/app/nutrition/page.tsx
+
+'use client';
+
+/* =========================
+   SECTION 1 — Imports
+   ========================= */
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
+
+import ProteinGoals from './ProteinGoals';
+import CalorieMetrics, { type DayAgg } from './CalorieMetrics';
+import BMIWidget from './bmi'; // <-- NEW: BMI 3rd tab
+
+import {
+  PAGE_SIZE,
+  dedupeById,
+  groupByDay,
+  sumTotals,
+  sumTotalsAny,
+  nowLocalInput,
+  localToIso,
+  fmtNum,
+  dayKey,
+} from './utils';
+import { SectionCard, Th, Td, KV, DateTimeField, TextArea, NumInput } from './ui';
+/* =========================
+   END SECTION 1
+   ========================= */
+
+
+/* =========================
+   SECTION 2 — Types
+   ========================= */
+export type NutritionEntry = {
+  id: number;
+  occurred_at: string;
+  item: string;
+  amount: string | null;
+  calories: number | null;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+  notes: string | null;
+};
+
+type Per100 = { calories: number; protein_g: number; carbs_g: number; fat_g: number };
+type AiItem = {
+  item: string;
+  grams: number;
+  per100: Per100;
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  notes?: string;
+};
+type AiResult = {
+  items: AiItem[];
+  totals: { calories: number; protein_g: number; carbs_g: number; fat_g: number };
+  assumptions?: string[];
+};
+
+type Gender = 'male' | 'female' | 'other' | 'unspecified';
+type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'very_active';
+type Profile = {
+  user_id: string;
+  gender: Gender | null;
+  height_cm: number | null;
+  weight_kg: number | null;
+  body_fat_percent: number | null;
+};
+type UserGoal = { id: number; goal_key: string; label: string };
+/* =========================
+   END SECTION 2
+   ========================= */
+
+
+/* =========================
+   SECTION 3 — Page Component
+   ========================= */
+export default function NutritionPage() {
+  const router = useRouter();
+
+  // --- hard caps / config ---
+  const MAX_DAYS = 30;
+
+  // --- auth / loading ---
+  const [userId, setUserId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // --- pagination + data ---
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [entries, setEntries] = useState<NutritionEntry[]>([]);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  // --- profile bits ---
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [activityLevel, setActivityLevel] = useState<ActivityLevel | null>(null);
+  const [goals, setGoals] = useState<UserGoal[]>([]);
+
+  // --- AI state ---
+  const [aiText, setAiText] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiItems, setAiItems] = useState<AiItem[] | null>(null);
+  const [aiOccurredLocal, setAiOccurredLocal] = useState(nowLocalInput());
+
+  // --- carousel tabs (NOW 3 tabs) ---
+  const [activeTab, setActiveTab] = useState<'protein' | 'calories' | 'bmi'>('protein');
+
+  const fmtDate = useMemo(() => new Intl.DateTimeFormat('he-IL', { dateStyle: 'full' }), []);
+  const fmtTime = useMemo(() => new Intl.DateTimeFormat('he-IL', { timeStyle: 'short' }), []);
+
+  /* -------- Bootstrap -------- */
+  useEffect(() => {
+    let ignore = false;
+    const init = async () => {
+      const { data } = await supabase.auth.getSession();
+      const uid = data.session?.user?.id ?? null;
+      if (!uid) {
+        router.push('/login');
+        return;
+      }
+      if (ignore) return;
+
+      setUserId(uid);
+      await Promise.all([loadPage(uid, 0), fetchProfile(uid), fetchActivity(uid), fetchGoals(uid)]);
+      setLoading(false);
+    };
+    init();
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (!session?.user?.id) router.push('/login');
+    });
+    return () => {
+      ignore = true;
+      sub.subscription.unsubscribe();
+    };
+  }, [router]);
+
+  /* -------- Data fetchers -------- */
+  const loadPage = async (uid: string, p: number) => {
+    setError(null);
+    const start = p * PAGE_SIZE;
+    const end = start + PAGE_SIZE - 1;
+
+    const { data, error, count } = await supabase
+      .from('nutrition_entries')
+      .select('id, occurred_at, item, amount, calories, protein_g, carbs_g, fat_g, notes', { count: 'exact' })
+      .eq('user_id', uid)
+      .order('occurred_at', { ascending: false })
+      .range(start, end);
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    const newEntries = (data ?? []) as NutritionEntry[];
+    setEntries((prev) => dedupeById([...prev, ...newEntries]));
+    setPage(p);
+    if (count !== null) {
+      setHasMore(end + 1 < count);
+    } else {
+      setHasMore(newEntries.length === PAGE_SIZE);
+    }
+  };
+
+  const fetchProfile = async (uid: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('user_id, gender, height_cm, weight_kg, body_fat_percent')
+      .eq('user_id', uid)
+      .maybeSingle();
+    if (error) { setError(error.message); return; }
+    if (data) setProfile(data as Profile);
+  };
+
+  const fetchActivity = async (uid: string) => {
+    const { data, error } = await supabase
+      .from('user_activity_levels')
+      .select('activity_level')
+      .eq('user_id', uid)
+      .maybeSingle();
+    if (error && !/relation .* does not exist/i.test(error.message)) setError(error.message);
+    if (data?.activity_level) setActivityLevel(data.activity_level as ActivityLevel);
+  };
+
+  const fetchGoals = async (uid: string) => {
+    const { data, error } = await supabase
+      .from('user_goals')
+      .select('id, goal_key, label')
+      .eq('user_id', uid)
+      .order('created_at', { ascending: true });
+    if (error && !/relation .* does not exist/i.test(error.message)) setError(error.message);
+    setGoals((data ?? []) as UserGoal[]);
+  };
+
+  /* -------- Derived: groups + today totals -------- */
+  const groupsAll = useMemo(() => groupByDay(entries), [entries]);        // all groups
+  const groups = useMemo(() => groupsAll.slice(0, MAX_DAYS), [groupsAll]); // limited to last 30 days
+
+  const todayKey = useMemo(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = `${d.getMonth() + 1}`.padStart(2, '0');
+    const day = `${d.getDate()}`.padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }, []);
+
+  const todayEntries = useMemo(
+    () => entries.filter((e) => dayKey(e.occurred_at) === todayKey),
+    [entries, todayKey]
+  );
+  const todayTotals = useMemo(() => sumTotals(todayEntries), [todayEntries]);
+  const proteinToday = todayTotals.protein_g ?? 0;
+
+  // 7 ימים אחרונים (מחשב מהקבוצות לאחר חיתוך)
+  const last7: DayAgg[] = useMemo(
+    () => groups.slice(0, 7).map((g) => ({ dayKey: g.dayKey, totals: g.totals })),
+    [groups]
+  );
+
+  /* -------- UI handlers -------- */
+  const toggleAll = (open: boolean) => {
+    const next: Record<string, boolean> = {};
+    for (const g of groups) next[g.dayKey] = open;
+    setExpanded(next);
+  };
+
+  // מקשי חיצים — מחזור בין 3 טאבים
+  useEffect(() => {
+    const order: Array<'protein' | 'calories' | 'bmi'> = ['protein', 'calories', 'bmi'];
+    const onKey = (e: KeyboardEvent) => {
+      const idx = order.indexOf(activeTab);
+      if (e.key === 'ArrowRight') setActiveTab(order[(idx + 1) % order.length]);
+      if (e.key === 'ArrowLeft') setActiveTab(order[(idx - 1 + order.length) % order.length]);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeTab]);
+
+  // --- AI: call backend ---
+  const runAi = async () => {
+    setAiError(null);
+    setAiItems(null);
+    if (!aiText.trim()) {
+      setAiError('נא לכתוב בקצרה מה אכלת (למשל: "שניצל מטוגן עם פירה")');
+      return;
+    }
+    try {
+      setAiLoading(true);
+      const res = await fetch('/api/nutrition-ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: aiText.trim() }),
+      });
+      const data: AiResult = await res.json();
+      if (!res.ok) {
+        setAiError((data as any)?.error || 'שגיאה בחישוב AI');
+        setAiLoading(false);
+        return;
+      }
+      setAiItems((data.items || []) as AiItem[]);
+    } catch (e: any) {
+      setAiError(e?.message || 'שגיאה לא צפויה');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  // --- AI: save ---
+  const saveAiItems = async () => {
+    if (!userId || !aiItems || aiItems.length === 0) return;
+    setAiError(null);
+
+    const occurred_at = localToIso(aiOccurredLocal);
+    const payload = aiItems.map((it) => ({
+      user_id: userId,
+      occurred_at,
+      item: it.item.trim() || 'לא ידוע',
+      amount: `${Math.max(0, Math.round(it.grams))} גרם`,
+      calories: Number.isFinite(it.calories) ? it.calories : 0,
+      protein_g: Number.isFinite(it.protein_g) ? it.protein_g : 0,
+      carbs_g: Number.isFinite(it.carbs_g) ? it.carbs_g : 0,
+      fat_g: Number.isFinite(it.fat_g) ? it.fat_g : 0,
+      notes: it.notes ? String(it.notes) : null,
+    }));
+
+    const { data, error } = await supabase
+      .from('nutrition_entries')
+      .insert(payload)
+      .select('id, occurred_at, item, amount, calories, protein_g, carbs_g, fat_g, notes');
+
+    if (error) { setAiError(error.message); return; }
+    const inserted = (data ?? []) as NutritionEntry[];
+    setEntries((prev) => dedupeById([...inserted, ...prev]));
+
+    const dk = dayKey(occurred_at);
+    setExpanded((ex) => ({ ...ex, [dk]: true }));
+
+    setAiText('');
+    setAiItems(null);
+  };
+
+  const deleteEntry = async (id: number) => {
+    const ok = confirm('למחוק את הרשומה?');
+    if (!ok) return;
+    const { error } = await supabase.from('nutrition_entries').delete().eq('id', id);
+    if (error) { setError(error.message); return; }
+    setEntries((prev) => prev.filter((e) => e.id !== id));
+  };
+
+  if (loading) return <p className="opacity-70">טוען…</p>;
+  const aiTotals = sumTotalsAny(aiItems ?? []);
+
+  /* -------- Render -------- */
+  return (
+    <div className="mx-auto max-w-5xl space-y-8" dir="rtl">
+      <header className="space-y-1">
+        <h1 className="text-3xl font-bold tracking-tight">תזונה</h1>
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          תאר/י בקצרה מה אכלת וקבל/י חישוב אוטומטי. מעקב חלבון, קלוריות ו-BMI 🎯
+        </p>
+      </header>
+
+      {/* ===== Tabs / Carousel header ===== */}
+      <nav
+        className="inline-flex rounded-lg ring-1 ring-black/10 dark:ring-white/10 overflow-hidden"
+        role="tablist"
+        aria-label="תצוגות מדדים"
+      >
+        <button
+          role="tab"
+          aria-selected={activeTab === 'protein'}
+          className={`px-4 py-2 text-sm font-medium ${
+            activeTab === 'protein'
+              ? 'bg-foreground text-background'
+              : 'bg-background text-foreground/80 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
+          }`}
+          onClick={() => setActiveTab('protein')}
+        >
+          מדדי חלבון
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === 'calories'}
+          className={`px-4 py-2 text-sm font-medium ${
+            activeTab === 'calories'
+              ? 'bg-foreground text-background'
+              : 'bg-background text-foreground/80 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
+          }`}
+          onClick={() => setActiveTab('calories')}
+        >
+          מדדים קלוריים
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === 'bmi'}
+          className={`px-4 py-2 text-sm font-medium ${
+            activeTab === 'bmi'
+              ? 'bg-foreground text-background'
+              : 'bg-background text-foreground/80 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
+          }`}
+          onClick={() => setActiveTab('bmi')}
+        >
+          BMI ומשקל
+        </button>
+      </nav>
+
+      {/* ===== Carousel body (3 tabs) ===== */}
+      <div className="relative">
+        {activeTab === 'protein' ? (
+          <ProteinGoals
+            profile={profile}
+            goals={goals}
+            activityLevel={activityLevel}
+            proteinToday={proteinToday}
+          />
+        ) : activeTab === 'calories' ? (
+          <CalorieMetrics
+            profile={profile}
+            activityLevel={activityLevel}
+            goals={goals}
+            todayTotals={todayTotals}
+            last7={last7}
+          />
+        ) : (
+          <BMIWidget userId={userId} profile={profile} />
+        )}
+      </div>
+
+      {/* ===== הוספה חכמה (AI) ===== */}
+      <SectionCard title="הוספה חכמה (AI)">
+        <div className="grid gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <TextArea
+              label="מה אכלתי?"
+              placeholder='לדוגמה: "שניצל מטוגן עם פירה וסלט קטן"'
+              value={aiText}
+              onChange={setAiText}
+              className="md:col-span-2"
+            />
+            <DateTimeField
+              label="תאריך ושעה לארוחה"
+              value={aiOccurredLocal}
+              onChange={setAiOccurredLocal}
+              className="md:col-span-1"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={runAi}
+              disabled={aiLoading}
+              className="rounded-lg px-4 py-2 h-11 bg-foreground text-background hover:opacity-90 disabled:opacity-50"
+            >
+              {aiLoading ? 'מחשב…' : 'חישוב AI'}
+            </button>
+            {aiItems && aiItems.length > 0 && (
+              <>
+                <div className="text-sm opacity-80 self-center">
+                  סה״כ (AI): {fmtNum(aiTotals.calories)} קק״ל · חלבון {fmtNum(aiTotals.protein_g)}ג׳ · פחמ׳ {fmtNum(aiTotals.carbs_g)}ג׳ · שומן {fmtNum(aiTotals.fat_g)}ג׳
+                </div>
+                <button
+                  onClick={saveAiItems}
+                  className="rounded-lg px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                >
+                  הוסף הכל לרשומות
+                </button>
+              </>
+            )}
+          </div>
+
+          {aiError && <p className="text-sm text-red-600">{aiError}</p>}
+
+          {aiItems && aiItems.length > 0 && (
+            <div className="overflow-x-auto rounded-lg ring-1 ring-black/10 dark:ring-white/10">
+              <table className="min-w-full text-sm">
+                <thead className="bg-black/5 dark:bg-white/10">
+                  <tr className="text-right">
+                    <Th>פריט</Th>
+                    <Th>כמות (גרם)</Th>
+                    <Th>קלוריות</Th>
+                    <Th>חלבון (ג׳)</Th>
+                    <Th>פחמימות (ג׳)</Th>
+                    <Th>שומן (ג׳)</Th>
+                    <Th>הערות</Th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-black/10 dark:divide-white/10">
+                  {aiItems.map((it, idx) => (
+                    <tr key={idx}>
+                      <Td>
+                        <input
+                          type="text"
+                          value={it.item}
+                          onChange={(e) => updateAiItem(idx, { item: e.target.value })}
+                          className="w-48 md:w-64 rounded border border-black/10 dark:border-white/20 bg-transparent px-2 py-1"
+                        />
+                      </Td>
+                      <Td>
+                        <NumInput value={it.grams} onChange={(v) => updateAiItem(idx, { grams: Math.max(0, v) })} />
+                      </Td>
+                      <Td>
+                        <NumInput value={it.calories} onChange={(v) => updateAiItem(idx, { calories: v })} />
+                      </Td>
+                      <Td>
+                        <NumInput value={it.protein_g} onChange={(v) => updateAiItem(idx, { protein_g: v })} />
+                      </Td>
+                      <Td>
+                        <NumInput value={it.carbs_g} onChange={(v) => updateAiItem(idx, { carbs_g: v })} />
+                      </Td>
+                      <Td>
+                        <NumInput value={it.fat_g} onChange={(v) => updateAiItem(idx, { fat_g: v })} />
+                      </Td>
+                      <Td>
+                        <input
+                          type="text"
+                          value={it.notes ?? ''}
+                          onChange={(e) => updateAiItem(idx, { notes: e.target.value })}
+                          className="w-52 md:w-64 rounded border border-black/10 dark:border-white/20 bg-transparent px-2 py-1"
+                        />
+                      </Td>
+                      <Td>
+                        <button
+                          onClick={() => removeAiItem(idx)}
+                          className="text-xs rounded-md border border-black/10 dark:border-white/20 px-2 py-1 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                        >
+                          הסר
+                        </button>
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {aiItems && aiItems.length === 0 && !aiLoading && (
+            <div className="text-sm opacity-70">לא זוהו פריטים מהטקסט. נסו לתאר קצת יותר.</div>
+          )}
+        </div>
+      </SectionCard>
+
+      {/* ===== Groups by day ===== */}
+      <div className="grid gap-4">
+        {groups.map((g) => {
+          const isOpen = expanded[g.dayKey] ?? false;
+          return (
+            <section key={g.dayKey} className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background">
+              <button
+                onClick={() => setExpanded((ex) => ({ ...ex, [g.dayKey]: !isOpen }))}
+                className="w-full text-right p-4 md:p-6 flex flex-col gap-1 hover:bg-black/[.03] dark:hover:bg-white/[.04]"
+              >
+                <div className="flex flex-wrap items-center gap-2 justify-between">
+                  <h2 className="text-lg md:text-xl font-semibold">{fmtDate.format(new Date(g.date))}</h2>
+                  <div className="text-sm md:text-base opacity-80">
+                    סה״כ: {fmtNum(g.totals.calories)} קק״ל · חלבון {fmtNum(g.totals.protein_g)}ג׳ · פחמ׳ {fmtNum(g.totals.carbs_g)}ג׳ · שומן {fmtNum(g.totals.fat_g)}ג׳
+                  </div>
+                </div>
+              </button>
+
+              {isOpen && (
+                <div className="p-4 md:p-6 pt-0">
+                  {/* Mobile cards (improved) */}
+                  <div className="grid gap-3 md:hidden">
+                    {g.items.map((e) => (
+                      <article key={e.id} className="rounded-lg ring-1 ring-black/10 dark:ring-white/10 p-3">
+                        {/* Row 1: time + delete */}
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-medium">{fmtTime.format(new Date(e.occurred_at))}</div>
+                          <button
+                            onClick={() => deleteEntry(e.id)}
+                            className="text-xs rounded-md border border-black/10 dark:border-white/20 px-2 py-1 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                          >
+                            מחק
+                          </button>
+                        </div>
+
+                        {/* Row 2: item + amount */}
+                        <div className="mt-1">
+                          <div className="font-medium leading-snug break-words">{e.item}</div>
+                          {e.amount && <div className="opacity-70 text-xs mt-0.5">{e.amount}</div>}
+                        </div>
+
+                        {/* Row 3: kcal + macro chips */}
+                        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
+                            קלוריות&nbsp;{fmtNum(e.calories)}
+                          </span>
+                          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
+                            חלבון&nbsp;{fmtNum(e.protein_g)}ג׳
+                          </span>
+                          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
+                            פחמ׳&nbsp;{fmtNum(e.carbs_g)}ג׳
+                          </span>
+                          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
+                            שומן&nbsp;{fmtNum(e.fat_g)}ג׳
+                          </span>
+                        </div>
+
+                        {/* Row 4: notes (wraps, small) */}
+                        {e.notes && (
+                          <div className="mt-2 text-xs leading-relaxed opacity-80 break-words whitespace-pre-wrap">
+                            {e.notes}
+                          </div>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+
+                  {/* Desktop table */}
+                  <div className="hidden md:block overflow-x-auto rounded-lg ring-1 ring-black/10 dark:ring-white/10">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-black/5 dark:bg-white/10">
+                        <tr className="text-right">
+                          <Th>שעה</Th>
+                          <Th>פריט</Th>
+                          <Th>כמות</Th>
+                          <Th>קלוריות</Th>
+                          <Th>חלבון (ג׳)</Th>
+                          <Th>פחמימות (ג׳)</Th>
+                          <Th>שומן (ג׳)</Th>
+                          <Th>הערות</Th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-black/10 dark:divide-white/10">
+                        {g.items.map((e) => (
+                          <tr key={e.id}>
+                            <Td>{fmtTime.format(new Date(e.occurred_at))}</Td>
+                            <Td className="font-medium">{e.item}</Td>
+                            <Td className="opacity-80">{e.amount ?? ''}</Td>
+                            <Td>{fmtNum(e.calories)}</Td>
+                            <Td>{fmtNum(e.protein_g)}</Td>
+                            <Td>{fmtNum(e.carbs_g)}</Td>
+                            <Td>{fmtNum(e.fat_g)}</Td>
+                            <Td className="max-w-[18rem] truncate">{e.notes ?? ''}</Td>
+                            <Td>
+                              <button
+                                onClick={() => deleteEntry(e.id)}
+                                className="text-xs rounded-md border border-black/10 dark:border-white/20 px-2 py-1 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                              >
+                                מחק
+                              </button>
+                            </Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
+
+      {/* Load more only if we haven't reached the MAX_DAYS cap */}
+      {hasMore && groupsAll.length < MAX_DAYS && (
+        <div className="pt-2">
+          <button
+            onClick={() => userId && loadPage(userId, page + 1)}
+            className="rounded-lg border border-black/10 dark:border-white/20 px-4 py-2 text-sm hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+          >
+            טען ימים ישנים יותר
+          </button>
+        </div>
+      )}
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+    </div>
+  );
+
+  /* ---- local helpers for AI table edits ---- */
+  function updateAiItem(index: number, patch: Partial<AiItem>) {
+    setAiItems((prev) => {
+      if (!prev) return prev;
+      const next = prev.slice();
+      const cur = { ...next[index], ...patch };
+
+      if (typeof patch.grams === 'number') {
+        const g = Math.max(0, patch.grams);
+        cur.grams = g;
+        cur.calories = Math.round(((cur.per100.calories * g) / 100) * 100) / 100;
+        cur.protein_g = Math.round(((cur.per100.protein_g * g) / 100) * 100) / 100;
+        cur.carbs_g = Math.round(((cur.per100.carbs_g * g) / 100) * 100) / 100;
+        cur.fat_g = Math.round(((cur.per100.fat_g * g) / 100) * 100) / 100;
+      }
+
+      const macrosChanged =
+        'calories' in patch || 'protein_g' in patch || 'carbs_g' in patch || 'fat_g' in patch;
+      if (macrosChanged && cur.grams > 0) {
+        cur.per100 = {
+          calories: Math.round(((cur.calories * 100) / cur.grams) * 100) / 100,
+          protein_g: Math.round(((cur.protein_g * 100) / cur.grams) * 100) / 100,
+          carbs_g: Math.round(((cur.carbs_g * 100) / cur.grams) * 100) / 100,
+          fat_g: Math.round(((cur.fat_g * 100) / 100 / (cur.grams / 1)) * 100) / 100, // keep pattern consistent
+        };
+        // Fix fat_g per100 calc (typo-safe):
+        cur.per100.fat_g = Math.round(((cur.fat_g * 100) / cur.grams) * 100) / 100;
+      }
+
+      next[index] = cur;
+      return next;
+    });
+  }
+
+  function removeAiItem(index: number) {
+    setAiItems((prev) => {
+      if (!prev) return prev;
+      const next = prev.slice();
+      next.splice(index, 1);
+      return next;
+    });
+  }
+}
+/* =========================
+   END SECTION 3
+   ========================= */

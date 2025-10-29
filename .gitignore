@@ -1,8 +1,10 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
-/node_modules
-/.pnp
+############################
+# Dependencies / package managers
+############################
+node_modules/
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -10,32 +12,76 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
+############################
+# Testing / coverage
+############################
+coverage/
 
-# next.js
-/.next/
-/out/
+############################
+# Next.js
+############################
+.next/
+.next/cache/
+out/
 
-# production
-/build
+############################
+# Production builds
+############################
+build/
 
-# misc
-.DS_Store
-*.pem
+############################
+# Env & secrets
+############################
+.env*
+!.env.example
 
-# debug
+############################
+# Vercel
+############################
+.vercel/
+
+############################
+# TypeScript
+############################
+*.tsbuildinfo
+# keep next-env.d.ts in repo
+# !next-env.d.ts
+
+############################
+# Logs / debug
+############################
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+############################
+# Editors / OS junk
+############################
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+Desktop.ini
 
-# vercel
-.vercel
+############################
+# Project-specific junk seen in tree
+############################
+# accidental curl flags saved as files
+-d
+-H
+# scratch / temp folders
+bu33/
+bu44del/
+bupreai/
+exercise lists/
+curl/
+dis/
+# stray HTML scratch file at root
+ex.html
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# project scaffolding / notes
+generate_project_structure*.py
+updateCode_Instructions*.txt
