@@ -1,9 +1,15 @@
+// gym-tracker-app/src/app/signup/page.tsx
 'use client';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
+
+// Build-time value for prod/preview; falls back to current origin in dev.
+const BASE_URL =
+  (process.env.NEXT_PUBLIC_SITE_URL || '').replace(/\/$/, '') ||
+  (typeof window !== 'undefined' ? window.location.origin : '');
 
 export default function SignupPage() {
   const router = useRouter();
@@ -23,7 +29,8 @@ export default function SignupPage() {
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/`,
+        // Make the magic-link land on the right host (prod or localhost)
+        emailRedirectTo: `${BASE_URL}/`,
       },
     });
 
