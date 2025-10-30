@@ -709,10 +709,10 @@ function EquipmentPageView(props: {
                 </div>
 
                 {/* Image: clicking it opens preview (does NOT select card) */}
-                <div className="mt-3 aspect-[4/3] overflow-hidden rounded-lg ring-1 ring-black/10 dark:ring-white/10">
+                <div className="mt-3 aspect-square overflow-hidden rounded-lg ring-1 ring-black/10 dark:ring-white/10 bg-white">
                   <button
                     type="button"
-                    className="h-full w-full"
+                    className="h-full w-full flex items-center justify-center"
                     onClick={(ev) => {
                       ev.stopPropagation();
                       openPreview(e.image_url, titleHe);
@@ -723,11 +723,12 @@ function EquipmentPageView(props: {
                     <img
                       src={e.image_url}
                       alt={titleHe}
-                      className="h-full w-full object-cover"
+                      className="h-full w-full object-contain"
                       loading="lazy"
                     />
                   </button>
                 </div>
+
 
                 <div className="mt-3">
                   <h3 className="text-base md:text-lg font-semibold leading-tight">{titleHe}</h3>
