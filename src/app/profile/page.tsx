@@ -173,6 +173,7 @@ export default function ProfilePage() {
 
   const [recent, setRecent] = useState<Measurement[]>([]);
   const [openMobileMeasId, setOpenMobileMeasId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null); // <-- למחיקה פר-רשומה
 
   // פורמט תאריך עברי
   const fmt = useMemo(
@@ -427,6 +428,28 @@ export default function ProfilePage() {
       notes: null,
     });
     if (userId) await fetchRecent(userId);
+  };
+
+  // ----- מחיקת מדידה בודדת -----
+  const deleteMeasurement = async (id: number, whenISO: string) => {
+    if (!userId) return;
+    const dateStr = fmt.format(new Date(whenISO));
+    if (!confirm(`למחוק את המדידה מתאריך ${dateStr}? פעולה זו בלתי הפיכה.`)) return;
+
+    setDeletingId(id);
+    setError(null);
+    const { error } = await supabase
+      .from('body_measurements')
+      .delete()
+      .eq('user_id', userId)
+      .eq('id', id);
+
+    setDeletingId(null);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setRecent((prev) => prev.filter((m) => m.id !== id));
   };
 
   if (loading) {
@@ -749,16 +772,7 @@ export default function ProfilePage() {
                   imageSrc={MEAS_IMG.body_fat_percent}
                 />
 
-                {/*
-                // הוסתר לפי בקשה: "הערות" לא יופיע כרגע
-                <TextField
-                  label="הערות"
-                  value={meas.notes ?? ''}
-                  onChange={(v) => setMeas((m) => ({ ...m, notes: v || null }))}
-                  className="col-span-2 md:col-span-3 xl:col-span-6"
-                  placeholder="עייפות/מחזור/נפיחות/אימון כבד – עוזר להסביר תנודות"
-                />
-                */}
+                {/* הערות הוסתרו לפי בקשה */}
 
                 <div className="col-span-2 md:col-span-3 lg:col-span-4 2xl:col-span-6">
                   <button
@@ -816,7 +830,17 @@ export default function ProfilePage() {
                                 <KV k="ירך" v={num(r.thigh_cm)} />
                                 <KV k="שוק" v={num(r.calf_cm)} />
                                 <KV k="צוואר" v={num(r.neck_cm ?? null)} />
-                                {/* הערות הוסתר */}
+                              </div>
+
+                              {/* כפתור מחיקה במובייל */}
+                              <div className="mt-3">
+                                <button
+                                  onClick={() => deleteMeasurement(r.id, r.measured_at)}
+                                  disabled={deletingId === r.id}
+                                  className="rounded-lg px-3 py-2 bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
+                                >
+                                  {deletingId === r.id ? 'מוחק…' : 'מחק מדידה זו'}
+                                </button>
                               </div>
                             </div>
                           )}
@@ -825,7 +849,7 @@ export default function ProfilePage() {
                     })}
                   </div>
 
-                  {/* דסקטופ: טבלה */}
+                  {/* דסקטופ: טבלה + כפתור מחיקה לכל שורה */}
                   <div className="hidden md:block overflow-x-auto rounded-lg ring-1 ring-black/10 dark:ring-white/10">
                     <table className="min-w-full text-sm">
                       <thead className="bg-black/5 dark:bg-white/10">
@@ -842,7 +866,7 @@ export default function ProfilePage() {
                           <Th>ירך</Th>
                           <Th>שוק</Th>
                           <Th>צוואר</Th>
-                          {/* <Th>הערות</Th> הוסתר */}
+                          <Th>פעולות</Th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-black/10 dark:divide-white/10">
@@ -860,7 +884,15 @@ export default function ProfilePage() {
                             <Td>{num(r.thigh_cm)}</Td>
                             <Td>{num(r.calf_cm)}</Td>
                             <Td>{num(r.neck_cm ?? null)}</Td>
-                            {/* <Td className="max-w-[16rem] truncate">{r.notes ?? ''}</Td> */}
+                            <Td>
+                              <button
+                                onClick={() => deleteMeasurement(r.id, r.measured_at)}
+                                disabled={deletingId === r.id}
+                                className="rounded-md px-2 py-1 bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
+                              >
+                                {deletingId === r.id ? 'מוחק…' : 'מחק'}
+                              </button>
+                            </Td>
                           </tr>
                         ))}
                       </tbody>
