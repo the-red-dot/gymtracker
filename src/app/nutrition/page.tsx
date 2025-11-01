@@ -108,9 +108,11 @@ export default function NutritionPage() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiItems, setAiItems] = useState<AiItem[] | null>(null);
   const [aiOccurredLocal, setAiOccurredLocal] = useState(nowLocalInput());
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiSavedAt, setAiSavedAt] = useState<number | null>(null);
 
-  // --- carousel tabs (NOW 3 tabs) ---
-  const [activeTab, setActiveTab] = useState<'protein' | 'calories' | 'bmi'>('protein');
+  // --- carousel tabs (NOW 4 tabs; default = 'what') ---
+  const [activeTab, setActiveTab] = useState<'what' | 'protein' | 'calories' | 'bmi'>('what');
 
   const fmtDate = useMemo(() => new Intl.DateTimeFormat('he-IL', { dateStyle: 'full' }), []);
   const fmtTime = useMemo(() => new Intl.DateTimeFormat('he-IL', { timeStyle: 'short' }), []);
@@ -231,9 +233,9 @@ export default function NutritionPage() {
     setExpanded(next);
   };
 
-  // מקשי חיצים — מחזור בין 3 טאבים
+  // מקשי חיצים — מחזור בין 4 טאבים
   useEffect(() => {
-    const order: Array<'protein' | 'calories' | 'bmi'> = ['protein', 'calories', 'bmi'];
+    const order: Array<'what' | 'protein' | 'calories' | 'bmi'> = ['what', 'protein', 'calories', 'bmi'];
     const onKey = (e: KeyboardEvent) => {
       const idx = order.indexOf(activeTab);
       if (e.key === 'ArrowRight') setActiveTab(order[(idx + 1) % order.length]);
@@ -274,8 +276,9 @@ export default function NutritionPage() {
 
   // --- AI: save ---
   const saveAiItems = async () => {
-    if (!userId || !aiItems || aiItems.length === 0) return;
+    if (!userId || !aiItems || aiItems.length === 0 || aiSaving) return;
     setAiError(null);
+    setAiSaving(true);
 
     const occurred_at = localToIso(aiOccurredLocal);
     const payload = aiItems.map((it) => ({
@@ -295,7 +298,7 @@ export default function NutritionPage() {
       .insert(payload)
       .select('id, occurred_at, item, amount, calories, protein_g, carbs_g, fat_g, notes');
 
-    if (error) { setAiError(error.message); return; }
+    if (error) { setAiError(error.message); setAiSaving(false); return; }
     const inserted = (data ?? []) as NutritionEntry[];
     setEntries((prev) => dedupeById([...inserted, ...prev]));
 
@@ -304,6 +307,9 @@ export default function NutritionPage() {
 
     setAiText('');
     setAiItems(null);
+    setAiSavedAt(Date.now());
+    setAiSaving(false);
+    setTimeout(() => setAiSavedAt((t) => (t && Date.now() - t > 0 ? null : t)), 1800);
   };
 
   const deleteEntry = async (id: number) => {
@@ -333,6 +339,18 @@ export default function NutritionPage() {
         role="tablist"
         aria-label="תצוגות מדדים"
       >
+        <button
+          role="tab"
+          aria-selected={activeTab === 'what'}
+          className={`px-4 py-2 text-sm font-medium ${
+            activeTab === 'what'
+              ? 'bg-foreground text-background'
+              : 'bg-background text-foreground/80 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
+          }`}
+          onClick={() => setActiveTab('what')}
+        >
+          מה אכלתי
+        </button>
         <button
           role="tab"
           aria-selected={activeTab === 'protein'}
@@ -371,7 +389,7 @@ export default function NutritionPage() {
         </button>
       </nav>
 
-      {/* ===== Carousel body (3 tabs) ===== */}
+      {/* ===== Carousel body (analytics-only) ===== */}
       <div className="relative">
         {activeTab === 'protein' ? (
           <ProteinGoals
@@ -388,237 +406,247 @@ export default function NutritionPage() {
             todayTotals={todayTotals}
             last7={last7}
           />
-        ) : (
+        ) : activeTab === 'bmi' ? (
           <BMIWidget userId={userId} profile={profile} />
-        )}
+        ) : null}
       </div>
 
-      {/* ===== הוספה חכמה (AI) ===== */}
-      <SectionCard title="הוספה חכמה (AI)">
-        <div className="grid gap-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <TextArea
-              label="מה אכלתי?"
-              placeholder='לדוגמה: "שניצל מטוגן עם פירה וסלט קטן"'
-              value={aiText}
-              onChange={setAiText}
-              className="md:col-span-2"
-            />
-            <DateTimeField
-              label="תאריך ושעה לארוחה"
-              value={aiOccurredLocal}
-              onChange={setAiOccurredLocal}
-              className="md:col-span-1"
-            />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={runAi}
-              disabled={aiLoading}
-              className="rounded-lg px-4 py-2 h-11 bg-foreground text-background hover:opacity-90 disabled:opacity-50"
-            >
-              {aiLoading ? 'מחשב…' : 'חישוב AI'}
-            </button>
-            {aiItems && aiItems.length > 0 && (
-              <>
-                <div className="text-sm opacity-80 self-center">
-                  סה״כ (AI): {fmtNum(aiTotals.calories)} קק״ל · חלבון {fmtNum(aiTotals.protein_g)}ג׳ · פחמ׳ {fmtNum(aiTotals.carbs_g)}ג׳ · שומן {fmtNum(aiTotals.fat_g)}ג׳
-                </div>
-                <button
-                  onClick={saveAiItems}
-                  className="rounded-lg px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-                >
-                  הוסף הכל לרשומות
-                </button>
-              </>
-            )}
-          </div>
-
-          {aiError && <p className="text-sm text-red-600">{aiError}</p>}
-
-          {aiItems && aiItems.length > 0 && (
-            <div className="overflow-x-auto rounded-lg ring-1 ring-black/10 dark:ring-white/10">
-              <table className="min-w-full text-sm">
-                <thead className="bg-black/5 dark:bg-white/10">
-                  <tr className="text-right">
-                    <Th>פריט</Th>
-                    <Th>כמות (גרם)</Th>
-                    <Th>קלוריות</Th>
-                    <Th>חלבון (ג׳)</Th>
-                    <Th>פחמימות (ג׳)</Th>
-                    <Th>שומן (ג׳)</Th>
-                    <Th>הערות</Th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-black/10 dark:divide-white/10">
-                  {aiItems.map((it, idx) => (
-                    <tr key={idx}>
-                      <Td>
-                        <input
-                          type="text"
-                          value={it.item}
-                          onChange={(e) => updateAiItem(idx, { item: e.target.value })}
-                          className="w-48 md:w-64 rounded border border-black/10 dark:border-white/20 bg-transparent px-2 py-1"
-                        />
-                      </Td>
-                      <Td>
-                        <NumInput value={it.grams} onChange={(v) => updateAiItem(idx, { grams: Math.max(0, v) })} />
-                      </Td>
-                      <Td>
-                        <NumInput value={it.calories} onChange={(v) => updateAiItem(idx, { calories: v })} />
-                      </Td>
-                      <Td>
-                        <NumInput value={it.protein_g} onChange={(v) => updateAiItem(idx, { protein_g: v })} />
-                      </Td>
-                      <Td>
-                        <NumInput value={it.carbs_g} onChange={(v) => updateAiItem(idx, { carbs_g: v })} />
-                      </Td>
-                      <Td>
-                        <NumInput value={it.fat_g} onChange={(v) => updateAiItem(idx, { fat_g: v })} />
-                      </Td>
-                      <Td>
-                        <input
-                          type="text"
-                          value={it.notes ?? ''}
-                          onChange={(e) => updateAiItem(idx, { notes: e.target.value })}
-                          className="w-52 md:w-64 rounded border border-black/10 dark:border-white/20 bg-transparent px-2 py-1"
-                        />
-                      </Td>
-                      <Td>
-                        <button
-                          onClick={() => removeAiItem(idx)}
-                          className="text-xs rounded-md border border-black/10 dark:border-white/20 px-2 py-1 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-                        >
-                          הסר
-                        </button>
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      {/* ===== הוספה חכמה (AI) — ONLY in "מה אכלתי" ===== */}
+      {activeTab === 'what' && (
+        <SectionCard title="הוספה חכמה (AI)">
+          <div className="grid gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <TextArea
+                label="מה אכלתי?"
+                placeholder='לדוגמה: "שניצל מטוגן עם פירה וסלט קטן"'
+                value={aiText}
+                onChange={setAiText}
+                className="md:col-span-2"
+              />
+              <DateTimeField
+                label="תאריך ושעה לארוחה"
+                value={aiOccurredLocal}
+                onChange={setAiOccurredLocal}
+                className="md:col-span-1"
+              />
             </div>
-          )}
-          {aiItems && aiItems.length === 0 && !aiLoading && (
-            <div className="text-sm opacity-70">לא זוהו פריטים מהטקסט. נסו לתאר קצת יותר.</div>
-          )}
-        </div>
-      </SectionCard>
-
-      {/* ===== Groups by day ===== */}
-      <div className="grid gap-4">
-        {groups.map((g) => {
-          const isOpen = expanded[g.dayKey] ?? false;
-          return (
-            <section key={g.dayKey} className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background">
+            <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => setExpanded((ex) => ({ ...ex, [g.dayKey]: !isOpen }))}
-                className="w-full text-right p-4 md:p-6 flex flex-col gap-1 hover:bg-black/[.03] dark:hover:bg-white/[.04]"
+                onClick={runAi}
+                disabled={aiLoading}
+                className="rounded-lg px-4 py-2 h-11 bg-foreground text-background hover:opacity-90 disabled:opacity-50"
               >
-                <div className="flex flex-wrap items-center gap-2 justify-between">
-                  <h2 className="text-lg md:text-xl font-semibold">{fmtDate.format(new Date(g.date))}</h2>
-                  <div className="text-sm md:text-base opacity-80">
-                    סה״כ: {fmtNum(g.totals.calories)} קק״ל · חלבון {fmtNum(g.totals.protein_g)}ג׳ · פחמ׳ {fmtNum(g.totals.carbs_g)}ג׳ · שומן {fmtNum(g.totals.fat_g)}ג׳
-                  </div>
-                </div>
+                {aiLoading ? 'מחשב…' : 'חישוב AI'}
               </button>
+              {aiItems && aiItems.length > 0 && (
+                <>
+                  <div className="text-sm opacity-80 self-center">
+                    סה״כ (AI): {fmtNum(aiTotals.calories)} קק״ל · חלבון {fmtNum(aiTotals.protein_g)}ג׳ · פחמ׳ {fmtNum(aiTotals.carbs_g)}ג׳ · שומן {fmtNum(aiTotals.fat_g)}ג׳
+                  </div>
+                  <button
+                    onClick={saveAiItems}
+                    disabled={aiSaving}
+                    aria-busy={aiSaving}
+                    className={`rounded-lg px-4 py-2 h-11 border border-black/10 dark:border-white/20
+                                ${aiSaving ? 'opacity-60 cursor-not-allowed' : 'hover:bg-black/[.04] dark:hover:bg-white/[.06]'}`}
+                  >
+                    {aiSaving ? 'שומר…' : 'הוסף הכל לרשומות'}
+                  </button>
+                  {aiSavedAt && !aiSaving && (
+                    <span className="text-sm text-emerald-600 self-center">נשמר! ✅</span>
+                  )}
+                </>
+              )}
+            </div>
 
-              {isOpen && (
-                <div className="p-4 md:p-6 pt-0">
-                  {/* Mobile cards (improved) */}
-                  <div className="grid gap-3 md:hidden">
-                    {g.items.map((e) => (
-                      <article key={e.id} className="rounded-lg ring-1 ring-black/10 dark:ring-white/10 p-3">
-                        {/* Row 1: time + delete */}
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-medium">{fmtTime.format(new Date(e.occurred_at))}</div>
+            {aiError && <p className="text-sm text-red-600">{aiError}</p>}
+
+            {aiItems && aiItems.length > 0 && (
+              <div className="overflow-x-auto rounded-lg ring-1 ring-black/10 dark:ring-white/10">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-black/5 dark:bg-white/10">
+                    <tr className="text-right">
+                      <Th>פריט</Th>
+                      <Th>כמות (גרם)</Th>
+                      <Th>קלוריות</Th>
+                      <Th>חלבון (ג׳)</Th>
+                      <Th>פחמימות (ג׳)</Th>
+                      <Th>שומן (ג׳)</Th>
+                      <Th>הערות</Th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-black/10 dark:divide-white/10">
+                    {aiItems.map((it, idx) => (
+                      <tr key={idx}>
+                        <Td>
+                          <input
+                            type="text"
+                            value={it.item}
+                            onChange={(e) => updateAiItem(idx, { item: e.target.value })}
+                            className="w-48 md:w-64 rounded border border-black/10 dark:border-white/20 bg-transparent px-2 py-1"
+                          />
+                        </Td>
+                        <Td>
+                          <NumInput value={it.grams} onChange={(v) => updateAiItem(idx, { grams: Math.max(0, v) })} />
+                        </Td>
+                        <Td>
+                          <NumInput value={it.calories} onChange={(v) => updateAiItem(idx, { calories: v })} />
+                        </Td>
+                        <Td>
+                          <NumInput value={it.protein_g} onChange={(v) => updateAiItem(idx, { protein_g: v })} />
+                        </Td>
+                        <Td>
+                          <NumInput value={it.carbs_g} onChange={(v) => updateAiItem(idx, { carbs_g: v })} />
+                        </Td>
+                        <Td>
+                          <NumInput value={it.fat_g} onChange={(v) => updateAiItem(idx, { fat_g: v })} />
+                        </Td>
+                        <Td>
+                          <input
+                            type="text"
+                            value={it.notes ?? ''}
+                            onChange={(e) => updateAiItem(idx, { notes: e.target.value })}
+                            className="w-52 md:w-64 rounded border border-black/10 dark:border-white/20 bg-transparent px-2 py-1"
+                          />
+                        </Td>
+                        <Td>
                           <button
-                            onClick={() => deleteEntry(e.id)}
+                            onClick={() => removeAiItem(idx)}
                             className="text-xs rounded-md border border-black/10 dark:border-white/20 px-2 py-1 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
                           >
-                            מחק
+                            הסר
                           </button>
-                        </div>
-
-                        {/* Row 2: item + amount */}
-                        <div className="mt-1">
-                          <div className="font-medium leading-snug break-words">{e.item}</div>
-                          {e.amount && <div className="opacity-70 text-xs mt-0.5">{e.amount}</div>}
-                        </div>
-
-                        {/* Row 3: kcal + macro chips */}
-                        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
-                            קלוריות&nbsp;{fmtNum(e.calories)}
-                          </span>
-                          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
-                            חלבון&nbsp;{fmtNum(e.protein_g)}ג׳
-                          </span>
-                          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
-                            פחמ׳&nbsp;{fmtNum(e.carbs_g)}ג׳
-                          </span>
-                          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
-                            שומן&nbsp;{fmtNum(e.fat_g)}ג׳
-                          </span>
-                        </div>
-
-                        {/* Row 4: notes (wraps, small) */}
-                        {e.notes && (
-                          <div className="mt-2 text-xs leading-relaxed opacity-80 break-words whitespace-pre-wrap">
-                            {e.notes}
-                          </div>
-                        )}
-                      </article>
+                        </Td>
+                      </tr>
                     ))}
-                  </div>
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {aiItems && aiItems.length === 0 && !aiLoading && (
+              <div className="text-sm opacity-70">לא זוהו פריטים מהטקסט. נסו לתאר קצת יותר.</div>
+            )}
+          </div>
+        </SectionCard>
+      )}
 
-                  {/* Desktop table */}
-                  <div className="hidden md:block overflow-x-auto rounded-lg ring-1 ring-black/10 dark:ring-white/10">
-                    <table className="min-w-full text-sm">
-                      <thead className="bg-black/5 dark:bg-white/10">
-                        <tr className="text-right">
-                          <Th>שעה</Th>
-                          <Th>פריט</Th>
-                          <Th>כמות</Th>
-                          <Th>קלוריות</Th>
-                          <Th>חלבון (ג׳)</Th>
-                          <Th>פחמימות (ג׳)</Th>
-                          <Th>שומן (ג׳)</Th>
-                          <Th>הערות</Th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-black/10 dark:divide-white/10">
-                        {g.items.map((e) => (
-                          <tr key={e.id}>
-                            <Td>{fmtTime.format(new Date(e.occurred_at))}</Td>
-                            <Td className="font-medium">{e.item}</Td>
-                            <Td className="opacity-80">{e.amount ?? ''}</Td>
-                            <Td>{fmtNum(e.calories)}</Td>
-                            <Td>{fmtNum(e.protein_g)}</Td>
-                            <Td>{fmtNum(e.carbs_g)}</Td>
-                            <Td>{fmtNum(e.fat_g)}</Td>
-                            <Td className="max-w-[18rem] truncate">{e.notes ?? ''}</Td>
-                            <Td>
-                              <button
-                                onClick={() => deleteEntry(e.id)}
-                                className="text-xs rounded-md border border-black/10 dark:border-white/20 px-2 py-1 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-                              >
-                                מחק
-                              </button>
-                            </Td>
+      {/* ===== Groups by day — ONLY in "מה אכלתי" ===== */}
+      {activeTab === 'what' && (
+        <div className="grid gap-4">
+          {groups.map((g) => {
+            const isOpen = expanded[g.dayKey] ?? false;
+            return (
+              <section key={g.dayKey} className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background">
+                <button
+                  onClick={() => setExpanded((ex) => ({ ...ex, [g.dayKey]: !isOpen }))}
+                  className="w-full text-right p-4 md:p-6 flex flex-col gap-1 hover:bg-black/[.03] dark:hover:bg-white/[.04]"
+                >
+                  <div className="flex flex-wrap items-center gap-2 justify-between">
+                    <h2 className="text-lg md:text-xl font-semibold">{fmtDate.format(new Date(g.date))}</h2>
+                    <div className="text-sm md:text-base opacity-80">
+                      סה״כ: {fmtNum(g.totals.calories)} קק״ל · חלבון {fmtNum(g.totals.protein_g)}ג׳ · פחמ׳ {fmtNum(g.totals.carbs_g)}ג׳ · שומן {fmtNum(g.totals.fat_g)}ג׳
+                    </div>
+                  </div>
+                </button>
+
+                {isOpen && (
+                  <div className="p-4 md:p-6 pt-0">
+                    {/* Mobile cards (improved) */}
+                    <div className="grid gap-3 md:hidden">
+                      {g.items.map((e) => (
+                        <article key={e.id} className="rounded-lg ring-1 ring-black/10 dark:ring-white/10 p-3">
+                          {/* Row 1: time + delete */}
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm font-medium">{fmtTime.format(new Date(e.occurred_at))}</div>
+                            <button
+                              onClick={() => deleteEntry(e.id)}
+                              className="text-xs rounded-md border border-black/10 dark:border-white/20 px-2 py-1 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                            >
+                              מחק
+                            </button>
+                          </div>
+
+                          {/* Row 2: item + amount */}
+                          <div className="mt-1">
+                            <div className="font-medium leading-snug break-words">{e.item}</div>
+                            {e.amount && <div className="opacity-70 text-xs mt-0.5">{e.amount}</div>}
+                          </div>
+
+                          {/* Row 3: kcal + macro chips */}
+                          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
+                              קלוריות&nbsp;{fmtNum(e.calories)}
+                            </span>
+                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
+                              חלבון&nbsp;{fmtNum(e.protein_g)}ג׳
+                            </span>
+                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
+                              פחמ׳&nbsp;{fmtNum(e.carbs_g)}ג׳
+                            </span>
+                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
+                              שומן&nbsp;{fmtNum(e.fat_g)}ג׳
+                            </span>
+                          </div>
+
+                          {/* Row 4: notes (wraps, small) */}
+                          {e.notes && (
+                            <div className="mt-2 text-xs leading-relaxed opacity-80 break-words whitespace-pre-wrap">
+                              {e.notes}
+                            </div>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+
+                    {/* Desktop table */}
+                    <div className="hidden md:block overflow-x-auto rounded-lg ring-1 ring-black/10 dark:ring-white/10">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-black/5 dark:bg-white/10">
+                          <tr className="text-right">
+                            <Th>שעה</Th>
+                            <Th>פריט</Th>
+                            <Th>כמות</Th>
+                            <Th>קלוריות</Th>
+                            <Th>חלבון (ג׳)</Th>
+                            <Th>פחמימות (ג׳)</Th>
+                            <Th>שומן (ג׳)</Th>
+                            <Th>הערות</Th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-black/10 dark:divide-white/10">
+                          {g.items.map((e) => (
+                            <tr key={e.id}>
+                              <Td>{fmtTime.format(new Date(e.occurred_at))}</Td>
+                              <Td className="font-medium">{e.item}</Td>
+                              <Td className="opacity-80">{e.amount ?? ''}</Td>
+                              <Td>{fmtNum(e.calories)}</Td>
+                              <Td>{fmtNum(e.protein_g)}</Td>
+                              <Td>{fmtNum(e.carbs_g)}</Td>
+                              <Td>{fmtNum(e.fat_g)}</Td>
+                              <Td className="max-w-[18rem] truncate">{e.notes ?? ''}</Td>
+                              <Td>
+                                <button
+                                  onClick={() => deleteEntry(e.id)}
+                                  className="text-xs rounded-md border border-black/10 dark:border-white/20 px-2 py-1 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                                >
+                                  מחק
+                                </button>
+                              </Td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
-              )}
-            </section>
-          );
-        })}
-      </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      )}
 
-      {/* Load more only if we haven't reached the MAX_DAYS cap */}
-      {hasMore && groupsAll.length < MAX_DAYS && (
+      {/* Load more only if we haven't reached the MAX_DAYS cap — ONLY in "מה אכלתי" */}
+      {activeTab === 'what' && hasMore && groupsAll.length < MAX_DAYS && (
         <div className="pt-2">
           <button
             onClick={() => userId && loadPage(userId, page + 1)}
