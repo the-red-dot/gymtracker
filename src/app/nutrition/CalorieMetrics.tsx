@@ -205,6 +205,46 @@ export default function CalorieMetrics({
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [pct, currentUserId, loadingPct]);
 
+  /* ---------- Protein g/kg (Persisted) ---------- */
+  const [gpk, setGpk] = useState<number | null>(null);
+  const [loadingGpk, setLoadingGpk] = useState<boolean>(true);
+
+  const hasBf = typeof bf === 'number' && bf >= 0 && bf <= 60;
+
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      try {
+        // דיפולט עקבי לפי מטרות ואם יש %שומן
+        const fallback = defaultGpkFromGoals(goals, hasBf ? (bf as number) : null);
+
+        let uid: string | undefined = profile?.user_id;
+        if (!uid) {
+          const { data } = await supabase.auth.getSession();
+          uid = data.session?.user?.id;
+        }
+        if (!uid) { setGpk(fallback); setLoadingGpk(false); return; }
+
+        const { data, error } = await supabase
+          .from('user_protein_settings')
+          .select('grams_per_kg')
+          .eq('user_id', uid)
+          .maybeSingle();
+
+        if (ignore) return;
+
+        if (!error && data && Number.isFinite(Number(data.grams_per_kg))) {
+          setGpk(Number(data.grams_per_kg));
+        } else {
+          setGpk(fallback);
+        }
+      } finally {
+        if (!ignore) setLoadingGpk(false);
+      }
+    })();
+    return () => { ignore = true; };
+  }, [profile?.user_id, goals, bf, hasBf]);
+
   /* ---------- Guardrails ---------- */
   const hardFloor = useMemo(() => {
     const sexFloor = gender === 'female' ? 1200 : gender === 'male' ? 1500 : 1400;
@@ -245,26 +285,29 @@ export default function CalorieMetrics({
 
     const hasBf = typeof bf === 'number' && bf >= 0 && bf <= 60;
     const lbm = hasBf ? weight * (1 - (bf as number) / 100) : null;
-    const inDeficit = pct >= 10;
+    const basisKg = lbm ?? weight;
 
-    // protein (g)
-    const pPerKg = hasBf ? (inDeficit ? 2.0 : 1.6) : inDeficit ? 2.0 : 1.6;
-    const protein_g = round2((lbm ?? weight) * pPerKg);
+    // g/kg בפועל — מה־DB אם נטען, אחרת דיפולט עקבי לפי מטרות ו-%שומן
+    const usedGpk = (gpk ?? defaultGpkFromGoals(goals, hasBf ? (bf as number) : null));
+
+    // === Protein first (aligned with ProteinGoals) ===
+    const protein_g = round2(basisKg * usedGpk);
     let protein_kcal = protein_g * 4;
 
-    // fat (g)
+    // === Fat: על בסיס BW, עם התאמה קלה ליום מנוחה ===
+    const inDeficit = pct >= 10;
     let fatPerKg = inDeficit ? 0.9 : 1.1;
-    fatPerKg = Math.max(fatPerKg, 0.6);
+    fatPerKg = Math.max(fatPerKg, 0.6);       // רצפה 0.6g/kg
     if (isRestToday) fatPerKg = round2(fatPerKg * 1.1); // +10% ביום מנוחה
     let fat_g = round2(weight * fatPerKg);
     let fat_kcal = fat_g * 9;
 
-    // carbs as remainder with 130g floor
+    // === Carbs: השארית, עם רצפת 130g ===
     let remain_kcal = targetCalories - protein_kcal - fat_kcal;
     let carbs_g = round2(Math.max(130, remain_kcal / 4));
     let carbs_kcal = carbs_g * 4;
 
-    // אם אין מקום לרצפת 130g פחמ׳ — חותכים שומן עד 0.6g/kg
+    // אם אין מקום לרצפת 130g — חותכים שומן עד 0.6g/kg
     if (remain_kcal < 130 * 4) {
       const fatFloor_g = round2(weight * 0.6);
       const need_kcal = 130 * 4 - remain_kcal;
@@ -283,7 +326,7 @@ export default function CalorieMetrics({
       carbs_g, carbs_kcal,
       total_kcal: round2(protein_kcal + fat_kcal + carbs_kcal),
     };
-  }, [targetCalories, weight, bf, pct, isRestToday]);
+  }, [targetCalories, weight, bf, pct, isRestToday, gpk, goals]);
 
   /* ----- צבע דינמי לבר ההתקדמות (ירוק בתוך היעד, אדום מעבר) ----- */
   const progressBarClass = useMemo(() => {
@@ -683,4 +726,13 @@ function toNum(v: unknown): number | null {
   if (v == null) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+/* ---- defaults for protein g/kg (align with ProteinGoals) ---- */
+function defaultGpkFromGoals(goals: UserGoal[], bfPercent: number | null) {
+  const has = (k: string) => goals.some((g) => g.goal_key === k);
+  if (has('cutting'))  return bfPercent != null ? 2.3 : 2.0; // אם יש %שומן → LBM*2.3; אחרת כיוונון כללי
+  if (has('recomp'))   return 2.0;
+  if (has('bulking'))  return 1.8;
+  return 1.6;
 }
