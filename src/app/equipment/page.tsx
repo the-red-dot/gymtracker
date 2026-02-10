@@ -106,8 +106,6 @@ const PLACEHOLDER_IMG =
 const toText = (v: string | null | undefined) => (v ?? '').trim();
 // ===== End Section 1 =====
 
-
-
 // ===== Section 2 — Component: State, Auth & Data Load =====
 export default function EquipmentPage() {
   const router = useRouter();
@@ -119,15 +117,16 @@ export default function EquipmentPage() {
   // Tabs
   const [tabs, setTabs] = useState<WorkoutTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<number | null>(null);
-  const activeTab = useMemo(() => tabs.find(t => t.id === activeTabId) || null, [tabs, activeTabId]);
-
+   
   // DB equipment + selections (for ALL equipment list)
   const [equipViews, setEquipViews] = useState<EquipView[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set()); // selection for CURRENT TAB
   const [selectedInitial, setSelectedInitial] = useState<Set<number>>(new Set());
+  // Map to hold selections for ALL tabs (needed for AI Refresh)
+  const [allTabsSelections, setAllTabsSelections] = useState<Record<number, Set<number>>>({});
 
   // JSON exercises
-  const [exercisesJson, setExercisesJson] = useState<ExerciseJson[]>([]);
+  const [_exercisesJson, setExercisesJson] = useState<ExerciseJson[]>([]);
 
   // Filters/Search
   const [search, setSearch] = useState('');
@@ -135,6 +134,15 @@ export default function EquipmentPage() {
 
   // Image preview (lightbox)
   const [preview, setPreview] = useState<{ url: string; alt: string } | null>(null);
+
+  // --- AI Generator State ---
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState<{ summary: string; tabsCount?: number; itemsCount?: number } | null>(null);
+  
+  // Persisted AI Plan
+  const [savedAiPlan, setSavedAiPlan] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -148,8 +156,12 @@ export default function EquipmentPage() {
       if (ignore) return;
       setUserId(uid);
 
-      // Load equipment master + tabs + selection of first tab
-      await Promise.all([loadEquipmentAndJson(uid), ensureTabsAndLoad(uid)]);
+      // Load equipment master + tabs + selection of first tab + Saved AI Plan
+      await Promise.all([
+        loadEquipmentAndJson(uid), 
+        ensureTabsAndLoad(uid),
+        loadSavedAiPlan(uid)
+      ]);
 
       setLoading(false);
     };
@@ -172,6 +184,33 @@ export default function EquipmentPage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // --- Load Saved AI Plan ---
+  async function loadSavedAiPlan(uid: string) {
+    const { data, error } = await supabase
+      .from('user_ai_plans')
+      .select('summary_html')
+      .eq('user_id', uid)
+      .maybeSingle();
+
+    if (!error && data) {
+      setSavedAiPlan(data.summary_html);
+    }
+  }
+
+  // --- Save AI Plan to DB ---
+  async function saveAiPlanToDb(html: string) {
+    if (!userId) return;
+    const { error } = await supabase
+      .from('user_ai_plans')
+      .upsert({ user_id: userId, summary_html: html }, { onConflict: 'user_id' });
+    
+    if (error) {
+      console.error('Error saving AI plan:', error);
+    } else {
+      setSavedAiPlan(html);
+    }
+  }
 
   async function ensureTabsAndLoad(uid: string) {
     try {
@@ -203,44 +242,65 @@ export default function EquipmentPage() {
       }
 
       setTabs(curTabs);
-      const firstId = curTabs[0].id;
-      setActiveTabId(firstId);
-      await loadTabSelection(uid, firstId);
+      
+      // Load all selections for ALL tabs (to support refresh logic later)
+      await loadAllTabsSelections(uid, curTabs);
+
+      if (activeTabId === null || !curTabs.find(t => t.id === activeTabId)) {
+        const firstId = curTabs[0].id;
+        setActiveTabId(firstId);
+        // Set local selection state for UI based on the pre-loaded map
+        updateLocalSelectionFromMap(firstId);
+      } else {
+        updateLocalSelectionFromMap(activeTabId);
+      }
+      
     } catch (e: any) {
       setError(e?.message || 'שגיאה בטעינת הטאבים');
     }
   }
 
-  async function loadTabSelection(uid: string, tabId: number) {
-    try {
-      setError(null);
-      const { data, error } = await supabase
-        .from('user_tab_equipment')
-        .select('equipment_id')
-        .eq('user_id', uid)
-        .eq('tab_id', tabId);
+  async function loadAllTabsSelections(uid: string, currentTabs: WorkoutTab[]) {
+    // Fetch all equipment selections for this user
+    const { data, error } = await supabase
+      .from('user_tab_equipment')
+      .select('tab_id, equipment_id')
+      .eq('user_id', uid);
 
-      if (error) throw new Error(error.message);
-      const ids = new Set<number>((data ?? []).map((r: any) => r.equipment_id));
-      setSelected(ids);
-      setSelectedInitial(new Set(ids));
-    } catch (e: any) {
-      // graceful fallback if table not ready
-      setError(
-        (e?.message || '').includes('relation') ?
-          'נראה שטבלת הטאבים טרם הוגדרה. ניתן להשתמש בברירת המחדל "כללי" לאחר יצירת הטבלאות.' :
-          (e?.message || 'שגיאה בטעינת בחירות הטאב')
-      );
-      setSelected(new Set());
-      setSelectedInitial(new Set());
+    if (error) {
+      console.error('Error loading selections:', error);
+      return;
     }
+
+    const map: Record<number, Set<number>> = {};
+    // Initialize empty sets for known tabs
+    currentTabs.forEach(t => map[t.id] = new Set());
+    
+    // Fill with data
+    (data || []).forEach((r: any) => {
+      if (!map[r.tab_id]) map[r.tab_id] = new Set();
+      map[r.tab_id].add(r.equipment_id);
+    });
+
+    setAllTabsSelections(map);
+  }
+
+  function updateLocalSelectionFromMap(tabId: number) {
+    const ids = allTabsSelections[tabId] || new Set();
+    setSelected(new Set(ids));
+    setSelectedInitial(new Set(ids));
+  }
+
+  async function loadTabSelection(uid: string, tabId: number) {
+    // Legacy single load wrapper - logic moved to loadAllTabsSelections for efficiency
+    // But we still need to refresh the map if called individually
+    await loadAllTabsSelections(uid, tabs);
+    updateLocalSelectionFromMap(tabId);
   }
 
   async function loadEquipmentAndJson(_uid: string) {
     try {
       setError(null);
-
-      // 1) Load DB equipment (including new columns)
       const { data: eqData, error: eqErr } = await supabase
         .from('equipment')
         .select('id, name_en, name_he, image_url, is_active, body_area_he, muscles_he, description_he')
@@ -249,18 +309,14 @@ export default function EquipmentPage() {
       if (eqErr) throw new Error(eqErr.message);
       const eqRows: EquipRow[] = (eqData ?? []).filter((r) => r.is_active !== false);
 
-      // 2) Load JSON (public/data/exercises.json)
       const res = await fetch(JSON_URL, { cache: 'no-store' });
       if (!res.ok) throw new Error('Failed to load exercises.json');
       const json = (await res.json()) as ExerciseJson[];
       setExercisesJson(json);
 
-      // 3) Build UI rows, preferring DB values and falling back to JSON
       const mapped: EquipView[] = eqRows.map((r) => {
         const name_en = toText(r.name_en);
         const name_he = toText(r.name_he);
-
-        // Try DB first; if missing, look for matching JSON to fill in
         const guessedCategory = guessCategory(name_en, name_he);
         const match = pickBestJsonMatch({ name_en, name_he, category: guessedCategory }, json);
 
@@ -277,7 +333,6 @@ export default function EquipmentPage() {
 
         const dbMuscles = Array.isArray(r.muscles_he) ? (r.muscles_he as string[]) : [];
         const muscles = dbMuscles.length ? dbMuscles : (match?.muscles_he ?? []);
-
         const img = r.image_url || match?.image_url || PLACEHOLDER_IMG;
 
         return {
@@ -326,8 +381,11 @@ export default function EquipmentPage() {
     const newTab: WorkoutTab = { id: data.id, name: data.name, emoji: data.emoji, order_index: data.order_index };
     const next = [...tabs, newTab].sort((a, b) => a.order_index - b.order_index);
     setTabs(next);
+    // Initialize empty selection set for new tab
+    setAllTabsSelections(prev => ({ ...prev, [newTab.id]: new Set() }));
+    
     setActiveTabId(newTab.id);
-    await loadTabSelection(userId, newTab.id);
+    updateLocalSelectionFromMap(newTab.id);
   }
 
   async function renameTab(tab: WorkoutTab) {
@@ -353,13 +411,18 @@ export default function EquipmentPage() {
     const { error } = await supabase.from('user_workout_tabs').delete().eq('id', tab.id).eq('user_id', userId);
     if (error) { setError(error.message); return; }
 
-    // clean local
     const rest = tabs.filter(t => t.id !== tab.id);
     setTabs(rest);
+    
+    // Update local map
+    const newMap = { ...allTabsSelections };
+    delete newMap[tab.id];
+    setAllTabsSelections(newMap);
+
     if (rest.length) {
       const newActive = rest[0].id;
       setActiveTabId(newActive);
-      await loadTabSelection(userId!, newActive);
+      updateLocalSelectionFromMap(newActive);
     } else {
       setActiveTabId(null);
       setSelected(new Set());
@@ -398,10 +461,151 @@ export default function EquipmentPage() {
       }
 
       setSelectedInitial(new Set(selected));
+      // Update the global map too
+      setAllTabsSelections(prev => ({ ...prev, [activeTabId]: new Set(selected) }));
+
     } catch (e: any) {
       setError(e?.message || 'שגיאה בשמירת הבחירות');
     } finally {
       setSaving(false);
+    }
+  }
+
+  // ---- AI Generator Logic (New & Refresh) ----
+  
+  // 1. New Plan from Prompt
+  async function handleAiPlan() {
+    if (!userId || !aiPrompt.trim()) return;
+    setAiLoading(true);
+    setAiResult(null);
+    setError(null);
+
+    try {
+      const key = typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') : null;
+      
+      const inventory = equipViews.map(e => ({
+        id: e.id,
+        name: e.name_he || e.name_en,
+        body_area: e.body_area_he
+      }));
+
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (key) headers['x-custom-api-key'] = key;
+
+      const res = await fetch('/api/workout-ai', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ 
+            mode: 'generate',
+            userRequest: aiPrompt, 
+            inventory 
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'שגיאה ביצירת התוכנית');
+      }
+
+      const data = await res.json();
+      
+      let totalTabs = 0;
+      let totalItems = 0;
+      let nextOrder = (tabs[tabs.length - 1]?.order_index ?? 0) + 1;
+
+      for (const t of data.tabs) {
+        const { data: newTab, error: tabErr } = await supabase
+          .from('user_workout_tabs')
+          .insert({ user_id: userId, name: t.name, emoji: t.emoji, order_index: nextOrder++ })
+          .select('id')
+          .single();
+        
+        if (tabErr) throw tabErr;
+        if (!newTab) continue;
+
+        totalTabs++;
+        
+        if (t.equipment_ids && t.equipment_ids.length > 0) {
+          const payload = t.equipment_ids.map((eid: number) => ({
+            user_id: userId,
+            tab_id: newTab.id,
+            equipment_id: eid
+          }));
+          
+          const { error: linkErr } = await supabase.from('user_tab_equipment').insert(payload);
+          if (linkErr) throw linkErr;
+          totalItems += t.equipment_ids.length;
+        }
+      }
+
+      setAiResult({ summary: data.summary, tabsCount: totalTabs, itemsCount: totalItems });
+      
+      // Save the generated HTML to DB
+      await saveAiPlanToDb(data.summary);
+
+      setAiPrompt('');
+      await ensureTabsAndLoad(userId);
+
+    } catch (e: any) {
+      setError(e?.message || 'שגיאה בלתי צפויה ביצירת התוכנית');
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  // 2. Refresh existing Plan (Analyze current tabs)
+  async function handleRefreshPlan() {
+    if (!userId) return;
+    setAiLoading(true);
+    setAiResult(null); 
+    setError(null);
+
+    try {
+      const key = typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') : null;
+
+      // Construct current routine structure
+      const currentRoutine = tabs.map(t => {
+        const eqIds = Array.from(allTabsSelections[t.id] || []);
+        const eqNames = eqIds.map(eid => {
+          const eq = equipViews.find(ev => ev.id === eid);
+          return eq ? (eq.name_he || eq.name_en) : `Unknown ID ${eid}`;
+        });
+        return {
+            name: t.name,
+            emoji: t.emoji,
+            exercises: eqNames
+        };
+      });
+
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (key) headers['x-custom-api-key'] = key;
+
+      const res = await fetch('/api/workout-ai', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ 
+            mode: 'refresh',
+            currentRoutine 
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'שגיאה ברענון התוכנית');
+      }
+
+      const data = await res.json();
+      
+      // Data should contain only 'summary'
+      setAiResult({ summary: data.summary });
+      
+      // Save new summary to DB
+      await saveAiPlanToDb(data.summary);
+
+    } catch (e: any) {
+      setError(e?.message || 'שגיאה בלתי צפויה ברענון התוכנית');
+    } finally {
+      setAiLoading(false);
     }
   }
 
@@ -416,11 +620,24 @@ export default function EquipmentPage() {
         setActiveTabId={async (id) => {
           if (id === activeTabId) return;
           setActiveTabId(id);
-          if (userId && id) await loadTabSelection(userId, id);
+          // Sync current selection first if saving needed? 
+          // (Right now we require manual save, so we just switch view)
+          updateLocalSelectionFromMap(id);
         }}
         createTab={createTab}
         renameTab={renameTab}
         deleteTab={deleteTab}
+        // AI
+        openAiModal={() => {
+            // If we have a result from THIS session, show it.
+            // If not, but we have a SAVED plan, load that into result (for display)
+            if (!aiResult && savedAiPlan) {
+                setAiResult({ summary: savedAiPlan });
+            }
+            setShowAiModal(true);
+        }}
+        hasSavedPlan={!!savedAiPlan}
+
         // data
         equipViews={equipViews}
         selected={selected}
@@ -455,10 +672,126 @@ export default function EquipmentPage() {
         alt={preview?.alt || ''}
         onClose={() => setPreview(null)}
       />
+
+      {/* AI Workout Builder Modal */}
+      {showAiModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" dir="rtl">
+          <div className="bg-white dark:bg-neutral-900 rounded-xl shadow-xl w-full max-w-lg overflow-hidden ring-1 ring-white/10 animate-in fade-in zoom-in duration-200 flex flex-col max-h-[85vh]">
+            <div className="p-4 border-b border-black/10 dark:border-white/10 flex justify-between items-center bg-gray-50 dark:bg-white/5 shrink-0">
+              <h3 className="font-semibold text-lg flex items-center gap-2">
+                <MagicIcon className="w-5 h-5 text-indigo-500" />
+                {aiResult ? 'התוכנית שלך' : 'בניית תוכנית חכמה (AI)'}
+              </h3>
+              <button 
+                onClick={() => { setShowAiModal(false); }} 
+                className="text-2xl leading-none opacity-50 hover:opacity-100 px-2"
+                aria-label="סגור"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+              {!aiResult ? (
+                // --- CREATE NEW MODE ---
+                <>
+                  <p className="text-sm text-gray-600 dark:text-gray-300">
+                    תאר/י את המטרות שלך (למשל: "אני רוצה קוביות בבטן", "חיזוק פלג גוף עליון", "תוכנית לכל הגוף ב-3 ימים").
+                    <br/>
+                    ה-AI יסרוק את המכשירים הקיימים וייצור עבורך טאבים חדשים עם תרגילים מתאימים.
+                  </p>
+                  
+                  <textarea
+                    className="w-full h-32 p-3 rounded-lg border border-black/10 dark:border-white/20 bg-transparent focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                    placeholder="פרט/י כאן את מטרות האימון שלך..."
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    disabled={aiLoading}
+                  />
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleAiPlan}
+                      disabled={aiLoading || !aiPrompt.trim()}
+                      className="bg-indigo-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {aiLoading ? 'הרובוט עובד... 🤖' : 'צור תוכנית ✨'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                // --- VIEW / REFRESH MODE ---
+                <div className="space-y-4">
+                  
+                  {/* Refresh Button - Based on ACTUAL tabs/exercises */}
+                  <div className="flex justify-end">
+                     <button
+                        onClick={handleRefreshPlan}
+                        disabled={aiLoading}
+                        className="text-xs flex items-center gap-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-300 px-3 py-1.5 rounded-full hover:bg-blue-100 dark:hover:bg-blue-900/40 transition"
+                        title="ינתח מחדש את הטאבים והתרגילים שבחרת וייצור הסבר מעודכן"
+                     >
+                        <svg className={`w-3.5 h-3.5 ${aiLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                        {aiLoading ? 'מעדכן...' : 'רענן ניתוח עפ"י השינויים שלי'}
+                     </button>
+                  </div>
+
+                  {/* Summary rendered as HTML */}
+                  <div className="bg-gray-50 dark:bg-white/5 p-4 rounded-lg text-sm text-right space-y-2 border border-black/5 dark:border-white/5 shadow-inner">
+                    <div 
+                      className="
+                        prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-white
+                        [&_h3]:text-base [&_h3]:font-bold [&_h3]:mt-6 [&_h3]:mb-3 [&_h3]:text-indigo-600 dark:[&_h3]:text-indigo-400 [&_h3:first-child]:mt-0
+                        [&_strong]:font-bold [&_strong]:text-indigo-700 dark:[&_strong]:text-indigo-300
+                        [&_ul]:list-none [&_ul]:space-y-4 [&_ul]:p-0
+                        [&_li]:bg-white dark:[&_li]:bg-white/5 [&_li]:p-3 [&_li]:rounded-md [&_li]:shadow-sm [&_li]:border [&_li]:border-black/5 dark:[&_li]:border-white/5
+                        [&_p]:leading-relaxed
+                        [&_hr]:my-6 [&_hr]:border-black/10 dark:[&_hr]:border-white/10
+                      "
+                      dangerouslySetInnerHTML={{ __html: aiResult.summary }}
+                    />
+                    
+                    {(aiResult.tabsCount || 0) > 0 && (
+                        <div className="flex gap-4 text-xs opacity-80 pt-4 border-t border-black/10 dark:border-white/10 mt-4 font-mono">
+                        <span>📂 {aiResult.tabsCount} טאבים חדשים נוצרו</span>
+                        </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <div className="bg-red-50 dark:bg-red-900/20 text-red-600 p-3 rounded-lg text-sm text-center">
+                  שגיאה: {error}
+                </div>
+              )}
+            </div>
+
+            {/* Footer actions for modal */}
+            {aiResult && (
+              <div className="p-4 border-t border-black/10 dark:border-white/10 bg-gray-50 dark:bg-white/5 flex gap-3 shrink-0">
+                <button
+                    onClick={() => { setAiResult(null); }}
+                    className="flex-1 bg-white dark:bg-neutral-800 border border-black/10 dark:border-white/10 text-gray-800 dark:text-white px-4 py-2.5 rounded-lg font-medium hover:bg-gray-50"
+                >
+                    ✨ תוכנית חדשה
+                </button>
+                <button
+                  onClick={() => { setShowAiModal(false); }}
+                  className="flex-1 bg-indigo-600 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-indigo-700"
+                >
+                  סגור
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }
 // ===== End Section 2 =====
+
 
 
 
@@ -471,6 +804,10 @@ function EquipmentPageView(props: {
   createTab: () => void | Promise<void>;
   renameTab: (tab: WorkoutTab) => void | Promise<void>;
   deleteTab: (tab: WorkoutTab) => void | Promise<void>;
+   
+  // AI
+  openAiModal: () => void;
+  hasSavedPlan: boolean; // NEW: to decide if we show the "Show Plan" button
 
   // equipment list + selection
   equipViews: EquipView[];
@@ -500,6 +837,8 @@ function EquipmentPageView(props: {
     createTab,
     renameTab,
     deleteTab,
+    openAiModal,
+    hasSavedPlan,
     equipViews,
     selected,
     selectedInitial,
@@ -519,7 +858,6 @@ function EquipmentPageView(props: {
     const q = search.trim().toLowerCase();
     let arr = equipViews;
 
-    // "picked" shows only selected items (per current tab)
     if (activeCat === 'picked') {
       arr = arr.filter((e) => selected.has(e.id));
     } else if (activeCat !== 'all') {
@@ -548,11 +886,33 @@ function EquipmentPageView(props: {
 
   return (
     <div className="mx-auto max-w-6xl space-y-8" dir="rtl">
-      <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">בחירת מכשירים</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          נהל/י טאבים שונים לאימונים (למשל "אימוני כוח", "קרדיו", "פלג גוף תחתון") ובחר/י לכל טאב את המכשירים שלו.
-        </p>
+      <header className="space-y-2 flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">בחירת מכשירים</h1>
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            נהל/י טאבים שונים לאימונים ובחר/י לכל טאב את המכשירים שלו.
+          </p>
+        </div>
+        <div className="flex gap-2">
+            {/* Show Plan Button - Only if we have a saved plan */}
+            {hasSavedPlan && (
+                <button
+                onClick={openAiModal}
+                className="inline-flex items-center gap-2 bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-gray-800 dark:text-white px-4 py-2 rounded-full font-medium shadow-sm hover:bg-gray-50 transition-all"
+                >
+                <span className="text-lg">📋</span>
+                הצג תוכנית
+                </button>
+            )}
+
+            <button
+            onClick={openAiModal}
+            className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-4 py-2 rounded-full font-medium shadow hover:shadow-lg transition-all hover:scale-105"
+            >
+            <MagicIcon className="w-4 h-4" />
+            בניית תוכנית AI
+            </button>
+        </div>
       </header>
 
       {/* Tabs bar */}
@@ -589,7 +949,7 @@ function EquipmentPageView(props: {
                   }}
                   className="rounded-lg border border-black/10 dark:border-white/20 px-3 py-2 text-sm hover:bg-black/[.04] dark:hover:bg-white/[.06]"
                 >
-                  שנה שם/אימוג׳י
+                  שנה שם
                 </button>
                 {tabs.length > 1 && (
                   <button
@@ -599,7 +959,7 @@ function EquipmentPageView(props: {
                     }}
                     className="rounded-lg border border-black/10 dark:border-white/20 px-3 py-2 text-sm hover:bg-black/[.04] dark:hover:bg-white/[.06]"
                   >
-                    מחק טאב
+                    מחק
                   </button>
                 )}
               </>
@@ -608,7 +968,7 @@ function EquipmentPageView(props: {
               onClick={createTab}
               className="rounded-lg px-3 py-2 text-sm bg-foreground text-background hover:opacity-90"
             >
-              + טאב חדש
+              + חדש
             </button>
           </div>
         </div>
@@ -671,8 +1031,6 @@ function EquipmentPageView(props: {
           )}
           {filtered.map((e) => {
             const isOn = selected.has(e.id);
-
-            // Display logic: HE as main title, EN below (only if different)
             const titleHe = e.name_he || e.name_en || 'לא ידוע';
             const subtitleEn =
               e.name_en && e.name_en.trim() !== '' && e.name_en.trim() !== e.name_he?.trim()
@@ -708,7 +1066,6 @@ function EquipmentPageView(props: {
                   </span>
                 </div>
 
-                {/* Image: clicking it opens preview (does NOT select card) */}
                 <div className="mt-3 aspect-square overflow-hidden rounded-lg ring-1 ring-black/10 dark:ring-white/10 bg-white">
                   <button
                     type="button"
@@ -728,7 +1085,6 @@ function EquipmentPageView(props: {
                     />
                   </button>
                 </div>
-
 
                 <div className="mt-3">
                   <h3 className="text-base md:text-lg font-semibold leading-tight">{titleHe}</h3>
@@ -796,7 +1152,6 @@ function EquipmentPageView(props: {
 // ===== End Section 3 =====
 
 
-
 // ===== Section 4 — Matching Logic (DB Equipment ↔ JSON Exercises) =====
 function pickBestJsonMatch(
   equip: { name_en: string; name_he: string; category: CategoryKey },
@@ -805,34 +1160,26 @@ function pickBestJsonMatch(
   if (!list.length) return undefined;
 
   const target = `${equip.name_en} ${equip.name_he}`.toLowerCase();
-
-  // Score each exercise: name hit > token overlap > body area/category hint
   let best: { ex: ExerciseJson; score: number } | null = null;
 
   for (const ex of list) {
     const nHe = (ex.name_he || '').toLowerCase();
     const nEn = (ex.name_en || '').toLowerCase();
-
     let score = 0;
 
-    // Strong score if the equipment name appears in exercise name (any language)
     if (nHe && (target.includes(nHe) || nHe.includes(equip.name_he.toLowerCase()))) score += 5;
     if (nEn && (target.includes(nEn) || nEn.includes(equip.name_en.toLowerCase()))) score += 5;
 
-    // Medium score if any token overlaps
     const tokens = tokenSet(target);
     const nameTokens = new Set([...tokenSet(nHe), ...tokenSet(nEn)]);
     const overlap = intersectCount(tokens, nameTokens);
     score += Math.min(overlap, 3); // cap
 
-    // Light score for body area → category match
     const exCat = catFromBodyAreaHeb(ex.body_area_he || '');
     if (exCat === equip.category) score += 2;
 
     if (!best || score > best.score) best = { ex, score };
   }
-
-  // Require some confidence: score >= 2 (name token or body match)
   return best && best.score >= 2 ? best.ex : undefined;
 }
 
@@ -855,41 +1202,22 @@ function categoryLabel(c: CategoryKey) {
 
 function categoryHeb(c: CategoryKey): string {
   switch (c) {
-    case 'chest':
-      return 'חזה';
-    case 'back':
-      return 'גב';
-    case 'shoulders':
-      return 'כתפיים';
-    case 'legs':
-      return 'רגליים';
-    case 'arms':
-      return 'ידיים';
-    case 'core':
-      return 'ליבה';
-    case 'cardio':
-      return 'קרדיו';
-    default:
-      return 'אחר';
+    case 'chest': return 'חזה';
+    case 'back': return 'גב';
+    case 'shoulders': return 'כתפיים';
+    case 'legs': return 'רגליים';
+    case 'arms': return 'ידיים';
+    case 'core': return 'ליבה';
+    case 'cardio': return 'קרדיו';
+    default: return 'אחר';
   }
 }
 
-/**
- * Map Hebrew body area labels to categories.
- * - מותניים => core
- * - ירכיים (and forms) => legs
- * - קרדיו/אירובי/לב־ריאה => cardio
- * Keeps other existing mappings.
- */
 function catFromBodyAreaHeb(body_he: string): CategoryKey {
   const s = (body_he || '').trim();
-
-  // Specific remaps first
-  if (/(מותני|מותניים)/.test(s)) return 'core';                     // waist → core
-  if (/(ירך|ירכיים|ירכי)/.test(s)) return 'legs';                    // thighs/hips → legs
-  if (/(קרדיו|אירובי|לב.?ר.?א?ה)/.test(s)) return 'cardio';         // cardio/aerobic/לב-ריאה
-
-  // Existing mappings
+  if (/(מותני|מותניים)/.test(s)) return 'core';
+  if (/(ירך|ירכיים|ירכי)/.test(s)) return 'legs';
+  if (/(קרדיו|אירובי|לב.?ר.?א?ה)/.test(s)) return 'cardio';
   if (/חזה/.test(s)) return 'chest';
   if (/גב/.test(s)) return 'back';
   if (/כתפ/.test(s)) return 'shoulders';
@@ -899,48 +1227,31 @@ function catFromBodyAreaHeb(body_he: string): CategoryKey {
   return 'other';
 }
 
-/**
- * Fallback guess from names if body_area is missing/unknown.
- * Also includes the same remaps for מותניים/ירכיים/קרדיו to avoid "other".
- */
 function guessCategory(name_en: string, name_he: string): CategoryKey {
   const s = `${name_en} ${name_he}`.toLowerCase();
-
-  // Specific remaps (Hebrew keywords inside names)
   if (/(מותני|מותניים)/.test(s)) return 'core';
   if (/(ירך|ירכיים)/.test(s)) return 'legs';
   if (/(קרדיו|אירובי|לב.?ר.?א?ה)/.test(s)) return 'cardio';
-
   if (/\b(chest|pec|fly)\b/.test(s) || /חזה/.test(s)) return 'chest';
   if (/\b(lat|row(?!er)|pull|pulldown|back)\b/.test(s) || /(גב|חתירה)/.test(s)) return 'back';
   if (/\b(shoulder|overhead|press)\b/.test(s) || /כתפ/.test(s)) return 'shoulders';
-  if (/\b(leg|squat|press|extension|curl|quad|hamstring)\b/.test(s) || /(רגל|ירך|שוק|ירכיים)/.test(s))
-    return 'legs';
+  if (/\b(leg|squat|press|extension|curl|quad|hamstring)\b/.test(s) || /(רגל|ירך|שוק|ירכיים)/.test(s)) return 'legs';
   if (/\b(biceps|triceps|curl|dip|pushdown)\b/.test(s) || /(יד|מרפק)/.test(s)) return 'arms';
   if (/\b(core|ab|crunch|plank)\b/.test(s) || /(בטן|ליבה|מותני|מותניים)/.test(s)) return 'core';
-  if (/\b(treadmill|elliptical|bike|cycling|rower|rowing|stair|stepper|spinning|run|walk)\b/.test(s) || /(קרדיו|מסלול|הליכון|אופניים|אליפטי|חתירה|מדרגות|ריצה|הליכה|אירובי)/.test(s))
-    return 'cardio';
+  if (/\b(treadmill|elliptical|bike|cycling|rower|rowing|stair|stepper|spinning|run|walk)\b/.test(s) || /(קרדיו|מסלול|הליכון|אופניים|אליפטי|חתירה|מדרגות|ריצה|הליכה|אירובי)/.test(s)) return 'cardio';
   return 'other';
 }
 
 function genericDescription(cat: CategoryKey): string {
   switch (cat) {
-    case 'chest':
-      return 'מכשיר לחיזוק ופיתוח שרירי החזה.';
-    case 'back':
-      return 'מכשיר לעבודה על שרירי הגב והיציבה.';
-    case 'shoulders':
-      return 'מכשיר לפיתוח שרירי הכתף.';
-    case 'legs':
-      return 'מכשיר לחיזוק ופיתוח שרירי הרגליים.';
-    case 'arms':
-      return 'מכשיר לעבודה ממוקדת על שרירי הידיים.';
-    case 'core':
-      return 'מכשיר/תרגיל לחיזוק שרירי הליבה והבטן.';
-    case 'cardio':
-      return 'מכשיר קרדיו לשיפור סבולת ומערכת לב־ריאה.';
-    default:
-      return 'מכשיר כללי לאימון פונקציונלי.';
+    case 'chest': return 'מכשיר לחיזוק ופיתוח שרירי החזה.';
+    case 'back': return 'מכשיר לעבודה על שרירי הגב והיציבה.';
+    case 'shoulders': return 'מכשיר לפיתוח שרירי הכתף.';
+    case 'legs': return 'מכשיר לחיזוק ופיתוח שרירי הרגליים.';
+    case 'arms': return 'מכשיר לעבודה ממוקדת על שרירי הידיים.';
+    case 'core': return 'מכשיר/תרגיל לחיזוק שרירי הליבה והבטן.';
+    case 'cardio': return 'מכשיר קרדיו לשיפור סבולת ומערכת לב־ריאה.';
+    default: return 'מכשיר כללי לאימון פונקציונלי.';
   }
 }
 
@@ -1039,6 +1350,16 @@ function ImageLightbox({
         />
       </div>
     </div>
+  );
+}
+
+function MagicIcon(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={props.className}>
+      <path d="M15 4V2m0 2l-2-2m2 2l2-2M15 4h2M15 4H13" />
+      <path d="M19 15v-2m0 2l-2-2m2 2l2-2M19 15h2M19 15h-2" />
+      <path d="M8.5 4a5.5 5.5 0 0 1 5.5 5.5v1a5.5 5.5 0 0 1-5.5 5.5H8a5.5 5.5 0 0 1-5.5-5.5v-1A5.5 5.5 0 0 1 8 5.5h.5Z" />
+    </svg>
   );
 }
 // ===== End Section 6 =====
