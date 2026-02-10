@@ -1,5 +1,4 @@
-// gym-tracker-app/src/app/nutrition/page.tsx
-
+// src/app/nutrition/page.tsx
 'use client';
 
 /* =========================
@@ -152,7 +151,7 @@ export default function NutritionPage() {
   const loadPage = async (uid: string, p: number) => {
     setError(null);
     const start = p * PAGE_SIZE;
-       const end = start + PAGE_SIZE - 1;
+        const end = start + PAGE_SIZE - 1;
 
     const { data, error, count } = await supabase
       .from('nutrition_entries')
@@ -301,20 +300,26 @@ export default function NutritionPage() {
       setAiLoading(true);
       let res: Response;
 
+      // --- Retrieve custom API key from local storage ---
+      const customKey = typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') : null;
+      const headers: HeadersInit = customKey ? { 'x-custom-api-key': customKey } : {};
+
       if (photoFile) {
         // Send multipart with optional text
         const fd = new FormData();
         fd.append('file', photoFile, photoFile.name || 'meal.jpg');
         if (aiText.trim()) fd.append('text', aiText.trim());
+        
         res = await fetch('/api/nutrition-ai', {
           method: 'POST',
+          headers: headers, // Pass custom key headers if exist
           body: fd,
         });
       } else {
         // Pure JSON (back-compat)
         res = await fetch('/api/nutrition-ai', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { ...headers, 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: aiText.trim() }),
         });
       }
@@ -803,10 +808,8 @@ export default function NutritionPage() {
           calories: Math.round(((cur.calories * 100) / cur.grams) * 100) / 100,
           protein_g: Math.round(((cur.protein_g * 100) / cur.grams) * 100) / 100,
           carbs_g: Math.round(((cur.carbs_g * 100) / cur.grams) * 100) / 100,
-          fat_g: Math.round(((cur.fat_g * 100) / 100 / (cur.grams / 1)) * 100) / 100, // keep pattern consistent
+          fat_g: Math.round(((cur.fat_g * 100) / cur.grams) * 100) / 100,
         };
-        // Fix fat_g per100 calc (typo-safe):
-        cur.per100.fat_g = Math.round(((cur.fat_g * 100) / cur.grams) * 100) / 100;
       }
 
       next[index] = cur;

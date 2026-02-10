@@ -46,7 +46,15 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024; // ~15MB
 /* ============================ Handler ============================ */
 export async function POST(req: Request) {
   try {
-    if (!process.env.GEMINI_API_KEY) return j({ error: 'GEMINI_API_KEY is not set' }, 500);
+    // 1. Check for Custom API Key in headers
+    const customKey = req.headers.get('x-custom-api-key');
+    
+    // 2. Fallback to Server Environment Variable
+    const apiKey = customKey || process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return j({ error: 'No API Key provided (Server or Custom)' }, 500);
+    }
 
     const ctype = (req.headers.get('content-type') || '').toLowerCase();
     const isMultipart = ctype.includes('multipart/form-data');
@@ -87,7 +95,7 @@ export async function POST(req: Request) {
     }
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${encodeURIComponent(
-      process.env.GEMINI_API_KEY
+      apiKey
     )}`;
 
     // === System instruction: Hebrew-only labels + granular decomposition ===

@@ -15,7 +15,7 @@ type Equip = {
 };
 
 type WorkoutExercise = {
-  id: number;           // workout_exercises.id
+  id: number;           // workout_exercises.id (0 = מתוכנן לפני יצירת אימון)
   equipment_id: number; // FK to equipment
   order_index: number;
   equip: Equip;
@@ -79,7 +79,7 @@ export default function StartWorkoutPage() {
   const [startedAt, setStartedAt] = useState<string | null>(null); // ISO
   const [endedAt, setEndedAt] = useState<string | null>(null);
 
-  // Exercises for this workout
+  // Exercises for this workout (or planned before start)
   const [exercises, setExercises] = useState<WorkoutExercise[]>([]);
 
   // Per-exercise new set form
@@ -88,7 +88,7 @@ export default function StartWorkoutPage() {
   );
   const weightRefMap = useRef<Record<number, HTMLInputElement | null>>({});
 
-  // Expand/collapse last 7 days
+  // Expand/collapse last 7 workouts history
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [historyByEquip, setHistoryByEquip] = useState<Record<number, HistoryRow[]>>({});
   const [historyBusy, setHistoryBusy] = useState<Record<number, boolean>>({});
@@ -108,6 +108,21 @@ export default function StartWorkoutPage() {
     const t = setInterval(() => setElapsed(Math.max(0, Math.floor((Date.now() - startMs) / 1000))), 1000);
     return () => clearInterval(t);
   }, [startedAt, endedAt]);
+
+  // ----- helpers to reset ui without navigation -----
+  const resetToPlanning = () => {
+    // מאפס מצב אימון מקומי — ה־effect של טעינת תוכן מטאב ירוץ שוב כי workoutId חוזר ל-null
+    setWorkoutId(null);
+    setStartedAt(null);
+    setEndedAt(null);
+    setExercises([]);          // ייטען מחדש מהטאב הנבחר
+    setFinishedWe({});
+    setActiveWeId(null);
+    setNewSetByEx({});
+    setExpanded({});
+    setHistoryByEquip({});
+    setError(null);
+  };
 
   // Bootstrap: auth + tabs + either resume or wait for user to choose a tab + rest-flag
   useEffect(() => {
@@ -302,77 +317,82 @@ export default function StartWorkoutPage() {
     );
   };
 
-  // Load last 7 days history for one equipment (lazy)
+  // Load last 7 actual workouts history for one equipment (lazy)
   const loadHistory = async (equipmentId: number) => {
     if (!userId) return;
     setHistoryBusy((m) => ({ ...m, [equipmentId]: true }));
 
-    // 1) find workouts in last 7 days
-    const since = new Date();
-    since.setDate(since.getDate() - 7);
-    const sinceIso = since.toISOString();
+    try {
+      // 1) Find last 7 workout_exercises for this equipment (joined with workouts to filter user & sort by date)
+      // במקום לסנן לפי תאריך (gte), אנו לוקחים את ה-7 האחרונים בהם התרגיל בוצע
+      const { data: wexRows, error: wexErr } = await supabase
+        .from('workout_exercises')
+        .select('id, workout_id, workouts!inner(started_at, user_id)')
+        .eq('equipment_id', equipmentId)
+        .eq('workouts.user_id', userId)
+        .order('started_at', { foreignTable: 'workouts', ascending: false })
+        .limit(7);
 
-    const { data: ws, error: wErr } = await supabase
-      .from('workouts')
-      .select('id, started_at')
-      .eq('user_id', userId)
-      .gte('started_at', sinceIso)
-      .order('started_at', { ascending: false });
+      if (wexErr) {
+        setError(wexErr.message);
+        setHistoryBusy((m) => ({ ...m, [equipmentId]: false }));
+        return;
+      }
 
-    if (wErr) { setError(wErr.message); setHistoryBusy((m) => ({ ...m, [equipmentId]: false })); return; }
-    const workouts = ws ?? [];
-    if (workouts.length === 0) {
-      setHistoryByEquip((m) => ({ ...m, [equipmentId]: [] }));
-      setHistoryBusy((m) => ({ ...m, [equipmentId]: false })); return;
+      if (!wexRows || wexRows.length === 0) {
+        setHistoryByEquip((m) => ({ ...m, [equipmentId]: [] }));
+        setHistoryBusy((m) => ({ ...m, [equipmentId]: false }));
+        return;
+      }
+
+      const weIds = wexRows.map((r: any) => r.id);
+      
+      // Map needed for constructing the rows later (workout_id -> started_at)
+      const workoutMeta = new Map<number, string>();
+      wexRows.forEach((r: any) => {
+        if (r.workouts?.started_at) {
+          workoutMeta.set(r.workout_id, r.workouts.started_at);
+        }
+      });
+
+      // 2) all sets for those workout_exercises
+      const { data: sets, error: sErr } = await supabase
+        .from('exercise_sets')
+        .select('id, workout_exercise_id, set_index, weight_kg, reps, distance_m')
+        .in('workout_exercise_id', weIds)
+        .order('set_index', { ascending: true });
+
+      if (sErr) {
+        setError(sErr.message);
+        setHistoryBusy((m) => ({ ...m, [equipmentId]: false }));
+        return;
+      }
+
+      const rows: HistoryRow[] = (sets ?? []).map((s) => {
+        // Find matching workout_id via workout_exercise_id
+        const parentWe = wexRows.find((r: any) => r.id === s.workout_exercise_id);
+        const wid = parentWe ? parentWe.workout_id : 0;
+        
+        return {
+          id: s.id,
+          set_index: s.set_index,
+          weight_kg: s.weight_kg,
+          reps: s.reps,
+          distance_m: s.distance_m,
+          workout_id: wid,
+          started_at: workoutMeta.get(wid) || '',
+        };
+      });
+
+      // Sort by workout started_at desc; within workout keep set order
+      rows.sort((a, b) => +new Date(b.started_at) - +new Date(a.started_at) || a.set_index - b.set_index);
+
+      setHistoryByEquip((m) => ({ ...m, [equipmentId]: rows }));
+    } catch (err: any) {
+      setError(err?.message || 'שגיאה בטעינת היסטוריה');
+    } finally {
+      setHistoryBusy((m) => ({ ...m, [equipmentId]: false }));
     }
-    const wIds = workouts.map((w) => w.id);
-
-    // 2) get workout_exercises for this equipment within those workouts
-    const { data: wex, error: exErr } = await supabase
-      .from('workout_exercises')
-      .select('id, workout_id')
-      .in('workout_id', wIds)
-      .eq('equipment_id', equipmentId);
-
-    if (exErr) { setError(exErr.message); setHistoryBusy((m) => ({ ...m, [equipmentId]: false })); return; }
-    const we = wex ?? [];
-    const weIds = we.map((x) => x.id);
-    if (weIds.length === 0) {
-      setHistoryByEquip((m) => ({ ...m, [equipmentId]: [] }));
-      setHistoryBusy((m) => ({ ...m, [equipmentId]: false })); return;
-    }
-
-    // 3) all sets for those workout_exercises
-    const { data: sets, error: sErr } = await supabase
-      .from('exercise_sets')
-      .select('id, workout_exercise_id, set_index, weight_kg, reps, distance_m')
-      .in('workout_exercise_id', weIds)
-      .order('set_index', { ascending: true });
-
-    if (sErr) { setError(sErr.message); setHistoryBusy((m) => ({ ...m, [equipmentId]: false })); return; }
-
-    // Map workout_id -> started_at
-    const startedByWid = new Map<number, string>(workouts.map((w) => [w.id, w.started_at]));
-    const widByWeid = new Map<number, number>(we.map((x) => [x.id, x.workout_id]));
-
-    const rows: HistoryRow[] = (sets ?? []).map((s) => {
-      const wid = widByWeid.get(s.workout_exercise_id)!;
-      return {
-        id: s.id,
-        set_index: s.set_index,
-        weight_kg: s.weight_kg,
-        reps: s.reps,
-        distance_m: s.distance_m,
-        workout_id: wid,
-        started_at: startedByWid.get(wid)!,
-      };
-    });
-
-    // Sort by workout started_at desc; within workout keep set order
-    rows.sort((a, b) => +new Date(b.started_at) - +new Date(a.started_at) || a.set_index - b.set_index);
-
-    setHistoryByEquip((m) => ({ ...m, [equipmentId]: rows }));
-    setHistoryBusy((m) => ({ ...m, [equipmentId]: false }));
   };
 
   // Add a set for a specific exercise card
@@ -452,19 +472,41 @@ export default function StartWorkoutPage() {
     if (error) { setError(error.message); return; }
     setEndedAt(endIso);
 
-    // ❌ removed auto-redirect to /progress
-    // Previously:
-    // setTimeout(() => router.push('/progress'), 800);
-    // Now we just show the "לצפייה בהתקדמות" button for manual navigation.
+    // ❌ אל תנווט לעמוד התקדמות שבוטל
+    // ❌ אל תציג כפתור "לצפייה בהתקדמות"
   };
 
+  // ---- Deep cancel without navigation (fix 404) ----
   const cancelWorkout = async () => {
-    if (!workoutId) { router.push('/workouts'); return; }
-    const ok = confirm('לבטל את האימון? פעולה זו תמחק את כל נתוני האימון שנרשמו.');
+    // אם אין אימון פעיל — פשוט איפוס UI, בלי ניתוב
+    if (!workoutId) { resetToPlanning(); return; }
+
+    const msg = endedAt
+      ? 'למחוק את האימון שהסתיים? פעולה זו תמחק לצמיתות את האימון והסטים שלו.'
+      : 'לבטל את האימון? פעולה זו תמחק את כל נתוני האימון שנרשמו.';
+    const ok = confirm(msg);
     if (!ok) return;
-    const { error } = await supabase.from('workouts').delete().eq('id', workoutId);
-    if (error) { setError(error.message); return; }
-    router.push('/workouts');
+
+    try {
+      // מוחקים קודם סטים, אח״כ תרגילי אימון, לבסוף האימון עצמו (למקרה שאין CASCADE)
+      const { data: weRows } = await supabase
+        .from('workout_exercises')
+        .select('id')
+        .eq('workout_id', workoutId);
+
+      const weIds = (weRows ?? []).map((r: any) => r.id);
+      if (weIds.length) {
+        await supabase.from('exercise_sets').delete().in('workout_exercise_id', weIds);
+        await supabase.from('workout_exercises').delete().in('id', weIds);
+      }
+
+      await supabase.from('workouts').delete().eq('id', workoutId);
+
+      // איפוס UI במקום ניתוב — נמנע 404
+      resetToPlanning();
+    } catch (e: any) {
+      setError(e?.message || 'שגיאה בביטול אימון.');
+    }
   };
 
   // ===== Rest-day helpers =====
@@ -574,12 +616,16 @@ export default function StartWorkoutPage() {
               התחל אימון
             </button>
           ) : endedAt ? (
-            <button
-              onClick={() => router.push('/progress')}
-              className="rounded-lg border border-black/10 dark:border-white/20 px-4 py-2 h-11 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-            >
-              לצפייה בהתקדמות
-            </button>
+            <>
+              {/* הוסר כפתור "לצפייה בהתקדמות" */}
+              <button
+                onClick={resetToPlanning}
+                className="rounded-lg border border-black/10 dark:border-white/20 px-4 py-2 h-11 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                title="איפוס המסך כדי להתחיל אימון חדש (האימון שהסתיים נשמר)"
+              >
+                התחל אימון חדש
+              </button>
+            </>
           ) : (
             <button
               onClick={finishWorkout}
@@ -651,7 +697,7 @@ export default function StartWorkoutPage() {
                     }}
                     className="rounded-lg border border-black/10 dark:border-white/20 px-3 py-2 text-sm hover:bg-black/[.04] dark:hover:bg-white/[.06]"
                   >
-                    {expanded[equipId] ? 'הסתר 7 ימים' : 'הצג 7 ימים'}
+                    {expanded[equipId] ? 'הסתר היסטוריה' : 'הצג היסטוריה אחרונה'}
                   </button>
                 </div>
 
@@ -661,7 +707,7 @@ export default function StartWorkoutPage() {
                     {historyBusy[equipId] ? (
                       <p className="text-sm opacity-70">טוען היסטוריה…</p>
                     ) : (historyByEquip[equipId]?.length ?? 0) === 0 ? (
-                      <p className="text-sm opacity-70">אין נתונים מ־7 הימים האחרונים.</p>
+                      <p className="text-sm opacity-70">לא נמצאה היסטוריה לתרגיל זה.</p>
                     ) : (
                       <AggregatedHistoryByWeight rows={historyByEquip[equipId]!} fmtDate={fmtDate} />
                     )}
@@ -738,6 +784,7 @@ export default function StartWorkoutPage() {
                           <Th>משקל (ק״ג)</Th>
                           <Th>חזרות</Th>
                           <Th>מרחק (מ׳)</Th>
+                          <Th>פעולות</Th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-black/10 dark:divide-white/10">
