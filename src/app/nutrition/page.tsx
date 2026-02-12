@@ -1,4 +1,3 @@
-// src/app/nutrition/page.tsx
 'use client';
 
 /* =========================
@@ -11,6 +10,7 @@ import { supabase } from '@/lib/supabaseClient';
 import ProteinGoals from './ProteinGoals';
 import CalorieMetrics, { type DayAgg } from './CalorieMetrics';
 import BMIWidget from './bmi';
+import DietitianAgent from './DietitianAgent'; 
 
 import {
   PAGE_SIZE,
@@ -69,8 +69,15 @@ type Profile = {
   height_cm: number | null;
   weight_kg: number | null;
   body_fat_percent: number | null;
+  birth_date: string | null; // <-- הוספנו את השדה כדי שיעבור ל-AI
 };
 type UserGoal = { id: number; goal_key: string; label: string };
+
+// סוג חדש להיסטוריית מנות
+type MealHistoryItem = {
+  meal_text: string;
+  usage_count: number;
+};
 /* =========================
    END SECTION 2
    ========================= */
@@ -102,6 +109,7 @@ export default function NutritionPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [activityLevel, setActivityLevel] = useState<ActivityLevel | null>(null);
   const [goals, setGoals] = useState<UserGoal[]>([]);
+  const [measurements, setMeasurements] = useState<any[]>([]); // New state for weight history
 
   // --- AI state (text + photo) ---
   const [aiText, setAiText] = useState('');
@@ -115,8 +123,12 @@ export default function NutritionPage() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
 
+  // --- Meal History State (Autocomplete) ---
+  const [mealHistory, setMealHistory] = useState<MealHistoryItem[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+
   // --- carousel tabs (4 tabs; default = 'what') ---
-  const [activeTab, setActiveTab] = useState<'what' | 'protein' | 'calories' | 'bmi'>('what');
+  const [activeTab, setActiveTab] = useState<'what' | 'protein' | 'calories' | 'bmi' | 'dietitian'>('what');
 
   const fmtDate = useMemo(() => new Intl.DateTimeFormat('he-IL', { dateStyle: 'full' }), []);
   const fmtTime = useMemo(() => new Intl.DateTimeFormat('he-IL', { timeStyle: 'short' }), []);
@@ -134,7 +146,14 @@ export default function NutritionPage() {
       if (ignore) return;
 
       setUserId(uid);
-      await Promise.all([loadPage(uid, 0), fetchProfile(uid), fetchActivity(uid), fetchGoals(uid)]);
+      await Promise.all([
+        loadPage(uid, 0), 
+        fetchProfile(uid), 
+        fetchActivity(uid), 
+        fetchGoals(uid),
+        fetchMealHistory(uid),
+        fetchMeasurements(uid) // New fetch
+      ]);
       setLoading(false);
     };
     init();
@@ -147,11 +166,52 @@ export default function NutritionPage() {
     };
   }, [router]);
 
+  /* -------- Data Fetchers Logic -------- */
+  const fetchMealHistory = async (uid: string) => {
+    const { data } = await supabase
+      .from('user_meal_history')
+      .select('meal_text, usage_count')
+      .eq('user_id', uid)
+      .order('usage_count', { ascending: false })
+      .limit(200);
+    
+    if (data) {
+      setMealHistory(data as MealHistoryItem[]);
+    }
+  };
+
+  const fetchMeasurements = async (uid: string) => {
+      const { data } = await supabase
+        .from('body_measurements')
+        .select('measured_at, weight_kg, body_fat_percent')
+        .eq('user_id', uid)
+        .order('measured_at', { ascending: false })
+        .limit(20);
+      if (data) setMeasurements(data);
+  };
+
+  // פילטור הצעות בזמן הקלדה
+  useEffect(() => {
+    if (!aiText.trim()) {
+      setSuggestions([]);
+      return;
+    }
+    const q = aiText.toLowerCase().trim();
+    
+    // סינון פשוט: אם הטקסט שרשמתי מוכל בהיסטוריה
+    const matches = mealHistory
+      .filter(h => h.meal_text.toLowerCase().includes(q) && h.meal_text !== aiText)
+      .map(h => h.meal_text)
+      .slice(0, 5); // מקסימום 5 הצעות
+
+    setSuggestions(matches);
+  }, [aiText, mealHistory]);
+
   /* -------- Data fetchers -------- */
   const loadPage = async (uid: string, p: number) => {
     setError(null);
     const start = p * PAGE_SIZE;
-        const end = start + PAGE_SIZE - 1;
+    const end = start + PAGE_SIZE - 1;
 
     const { data, error, count } = await supabase
       .from('nutrition_entries')
@@ -178,7 +238,8 @@ export default function NutritionPage() {
   const fetchProfile = async (uid: string) => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('user_id, gender, height_cm, weight_kg, body_fat_percent')
+      // כאן מתבצעת השליפה המעודכנת של תאריך הלידה
+      .select('user_id, gender, height_cm, weight_kg, body_fat_percent, birth_date')
       .eq('user_id', uid)
       .maybeSingle();
     if (error) { setError(error.message); return; }
@@ -238,7 +299,7 @@ export default function NutritionPage() {
 
   // Arrow keys — cycle tabs
   useEffect(() => {
-    const order: Array<'what' | 'protein' | 'calories' | 'bmi'> = ['what', 'protein', 'calories', 'bmi'];
+    const order: Array<'what' | 'protein' | 'calories' | 'bmi' | 'dietitian'> = ['what', 'protein', 'calories', 'bmi', 'dietitian'];
     const onKey = (e: KeyboardEvent) => {
       const idx = order.indexOf(activeTab);
       if (e.key === 'ArrowRight') setActiveTab(order[(idx + 1) % order.length]);
@@ -257,7 +318,6 @@ export default function NutritionPage() {
 
   function onPickPhoto(file: File | null) {
     setAiError(null);
-    // Cleanup previous preview URL
     if (photoPreviewUrl) {
       URL.revokeObjectURL(photoPreviewUrl);
       setPhotoPreviewUrl(null);
@@ -300,23 +360,20 @@ export default function NutritionPage() {
       setAiLoading(true);
       let res: Response;
 
-      // --- Retrieve custom API key from local storage ---
       const customKey = typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') : null;
       const headers: HeadersInit = customKey ? { 'x-custom-api-key': customKey } : {};
 
       if (photoFile) {
-        // Send multipart with optional text
         const fd = new FormData();
         fd.append('file', photoFile, photoFile.name || 'meal.jpg');
         if (aiText.trim()) fd.append('text', aiText.trim());
         
         res = await fetch('/api/nutrition-ai', {
           method: 'POST',
-          headers: headers, // Pass custom key headers if exist
+          headers: headers,
           body: fd,
         });
       } else {
-        // Pure JSON (back-compat)
         res = await fetch('/api/nutrition-ai', {
           method: 'POST',
           headers: { ...headers, 'Content-Type': 'application/json' },
@@ -338,7 +395,40 @@ export default function NutritionPage() {
     }
   };
 
-  // --- AI: save ---
+  // --- Update Meal History (Upsert) ---
+  const updateMealHistory = async (text: string) => {
+    if (!userId || !text) return;
+    const cleanText = text.trim();
+    if (cleanText.length < 3) return; // Ignore very short texts
+
+    // נסיון לאתר האם קיים בדיוק
+    const { data: existing } = await supabase
+      .from('user_meal_history')
+      .select('id, usage_count')
+      .eq('user_id', userId)
+      .eq('meal_text', cleanText)
+      .maybeSingle();
+
+    if (existing) {
+      // עדכון: הגדלת מונה
+      await supabase
+        .from('user_meal_history')
+        .update({ usage_count: existing.usage_count + 1, last_used_at: new Date().toISOString() })
+        .eq('id', existing.id);
+      
+      // עדכון סטייט מקומי
+      setMealHistory(prev => prev.map(m => m.meal_text === cleanText ? { ...m, usage_count: m.usage_count + 1 } : m).sort((a,b) => b.usage_count - a.usage_count));
+    } else {
+      // חדש: הוספה
+      await supabase
+        .from('user_meal_history')
+        .insert({ user_id: userId, meal_text: cleanText, usage_count: 1 });
+      
+      setMealHistory(prev => [...prev, { meal_text: cleanText, usage_count: 1 }].sort((a,b) => b.usage_count - a.usage_count));
+    }
+  };
+
+  // --- AI: save (Confirm & Save) ---
   const saveAiItems = async () => {
     if (!userId || !aiItems || aiItems.length === 0 || aiSaving) return;
     setAiError(null);
@@ -365,6 +455,11 @@ export default function NutritionPage() {
     if (error) { setAiError(error.message); setAiSaving(false); return; }
     const inserted = (data ?? []) as NutritionEntry[];
     setEntries((prev) => dedupeById([...inserted, ...prev]));
+
+    // שמירת הטקסט להיסטוריה (רק אם היה טקסט מקורי)
+    if (aiText && !photoFile) {
+      await updateMealHistory(aiText);
+    }
 
     const dk = dayKey(occurred_at);
     setExpanded((ex) => ({ ...ex, [dk]: true }));
@@ -400,7 +495,7 @@ export default function NutritionPage() {
 
       {/* ===== Tabs / Carousel header ===== */}
       <nav
-        className="inline-flex rounded-lg ring-1 ring-black/10 dark:ring-white/10 overflow-hidden"
+        className="inline-flex rounded-lg ring-1 ring-black/10 dark:ring-white/10 overflow-hidden flex-wrap gap-1"
         role="tablist"
         aria-label="תצוגות מדדים"
       >
@@ -452,9 +547,22 @@ export default function NutritionPage() {
         >
           BMI ומשקל
         </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === 'dietitian'}
+          className={`px-4 py-2 text-sm font-medium flex items-center gap-2 ${
+            activeTab === 'dietitian'
+              ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white'
+              : 'bg-background text-foreground/80 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
+          }`}
+          onClick={() => setActiveTab('dietitian')}
+        >
+          <span>👩‍⚕️</span>
+          דיאטנית AI
+        </button>
       </nav>
 
-      {/* ===== Carousel body (analytics only) ===== */}
+      {/* ===== Carousel body ===== */}
       <div className="relative">
         {activeTab === 'protein' ? (
           <ProteinGoals
@@ -473,6 +581,17 @@ export default function NutritionPage() {
           />
         ) : activeTab === 'bmi' ? (
           <BMIWidget userId={userId} profile={profile} />
+        ) : activeTab === 'dietitian' ? (
+           // --- Dietitian Agent ---
+           userId && (
+               <DietitianAgent 
+                 userId={userId} 
+                 logs={entries} 
+                 userGoals={goals} 
+                 userProfileData={{...profile, activityLevel}}
+                 weightHistory={measurements} // Passing real weight data
+               />
+           )
         ) : null}
       </div>
 
@@ -482,12 +601,15 @@ export default function NutritionPage() {
           <div className="grid gap-4">
             {/* Text + Date */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* שימוש ברכיב TextArea המשודרג עם השלמה אוטומטית */}
               <TextArea
                 label="מה אכלתי?"
-                placeholder='לדוגמה: "שניצל מטוגן עם פירה וסלט קטן" (לא חובה אם יש תמונה)'
+                placeholder='לדוגמה: "שניצל מטוגן עם פירה וסלט קטן" (או בחר מההיסטוריה)'
                 value={aiText}
                 onChange={setAiText}
                 className="md:col-span-2"
+                suggestions={suggestions}
+                onSelectSuggestion={(s) => setAiText(s)}
               />
               <DateTimeField
                 label="תאריך ושעה לארוחה"

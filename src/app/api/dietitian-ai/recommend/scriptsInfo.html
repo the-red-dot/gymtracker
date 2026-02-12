@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>תיעוד מבנה פרויקט - דיאטנית AI</title>
+    <style>
+        :root {
+            --primary-color: #2563eb; /* כחול נעים */
+            --secondary-color: #475569; /* אפור כהה */
+            --bg-color: #f8fafc; /* רקע בהיר מאוד */
+            --card-bg: #ffffff;
+            --accent-green: #10b981;
+            --accent-purple: #8b5cf6;
+            --accent-orange: #f59e0b;
+            --code-bg: #f1f5f9;
+            --border-radius: 12px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--secondary-color);
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        h1 {
+            color: #1e293b;
+            margin: 0;
+            font-size: 2rem;
+            font-weight: 700;
+        }
+
+        h2 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #334155;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+        }
+
+        .section-icon {
+            font-size: 1.5rem;
+        }
+
+        /* Card Styling */
+        .card {
+            background: var(--card-bg);
+            border-radius: var(--border-radius);
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+            border: 1px solid #e2e8f0;
+            transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Color Coding Borders */
+        .backend-card { border-right: 5px solid var(--accent-purple); }
+        .infra-card { border-right: 5px solid var(--secondary-color); }
+        .frontend-card { border-right: 5px solid var(--accent-orange); }
+
+        .file-path {
+            display: inline-block;
+            background-color: var(--code-bg);
+            color: #0f172a;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            direction: ltr; /* נתיבים תמיד משמאל לימין */
+        }
+
+        .description, .edit-when {
+            margin-bottom: 12px;
+        }
+
+        .label {
+            font-weight: 700;
+            color: #1e293b;
+            display: inline-block;
+            margin-left: 5px;
+        }
+
+        .edit-when {
+            background-color: #fffbeb; /* צהבהב עדין להערות */
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            border-right: 3px solid var(--accent-orange);
+            color: #78350f;
+        }
+
+        @media (max-width: 600px) {
+            body { padding: 10px; }
+            .card { padding: 16px; }
+            h1 { font-size: 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>מבנה פרויקט הדיאטנית</h1>
+        <p>תיעוד קבצים, נתיבים ותחומי אחריות</p>
+    </header>
+
+    <section>
+        <h2><span class="section-icon">🧠</span> מוח ולוגיקה (Backend APIs)</h2>
+
+        <div class="card backend-card">
+            <div class="file-path">src/app/api/dietitian-ai/analyze/route.ts</div>
+            <div class="description">
+                <span class="label">מה זה עושה:</span>
+                אחראי על פיצ'ר "סקירת מצב". הוא מקבל את יומן האכילה, המשקל והפרופיל, ומחזיר דוח מילולי (HTML) עם תובנות.
+            </div>
+            <div class="edit-when">
+                <span class="label">מתי לערוך:</span>
+                כשתרצה לשנות את הניתוח שהדיאטנית נותנת (למשל: לבקש ממנה להיות קשוחה יותר, להתייחס לנתונים נוספים כמו אחוזי שומן, או לשנות את מבנה הדוח).
+            </div>
+        </div>
+
+        <div class="card backend-card">
+            <div class="file-path">src/app/api/dietitian-ai/generate-plan/route.ts</div>
+            <div class="description">
+                <span class="label">מה זה עושה:</span>
+                אחראי על פיצ'ר "תפריט מותאם אישית". יוצר תוכנית שבועית (או ל-3 ימים) לפי שעות השינה/קימה והעדפות.
+            </div>
+            <div class="edit-when">
+                <span class="label">מתי לערוך:</span>
+                כשתרצה לשנות את הלוגיקה של בניית התפריט (למשל: להוסיף עוד ארוחות ביניים, לשנות את חלוקת הקלוריות בין הארוחות, או להכריח אותה לגוון יותר).
+            </div>
+        </div>
+
+        <div class="card backend-card">
+            <div class="file-path">src/app/api/dietitian-ai/recommend/route.ts</div>
+            <div class="description">
+                <span class="label">מה זה עושה:</span>
+                אחראי על פיצ'ר "מה לאכול עכשיו?". בודק מה השעה, מה חסר למשתמש היום, וממליץ על מנה אחת ספציפית.
+            </div>
+            <div class="edit-when">
+                <span class="label">מתי לערוך:</span>
+                כשתרצה לשנות את ההיגיון של ההמלצה המיידית (למשל: לתת עדיפות למנות מהירות בלילה, או להציע מנות "מושחתות" בסופ"ש).
+            </div>
+        </div>
+
+        <div class="card backend-card">
+            <div class="file-path">src/app/api/dietitian-ai/recipe/route.ts</div>
+            <div class="description">
+                <span class="label">מה זה עושה:</span>
+                אחראי על כפתור "מתכון". מייצר הוראות הכנה ומצרכים למנה ספציפית.
+            </div>
+            <div class="edit-when">
+                <span class="label">מתי לערוך:</span>
+                אם תרצה לשנות את פורמט המתכון (למשל: להוסיף זמני הכנה מפורטים יותר, או לבקש טיפים לטבעונים).
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2><span class="section-icon">🛠️</span> תשתית משותפת</h2>
+        <div class="card infra-card">
+            <div class="file-path">src/lib/ai-client.ts</div>
+            <div class="description">
+                <span class="label">מה זה עושה:</span>
+                הסקריפט הטכני שמדבר עם גוגל (Gemini). הוא מנהל את ה-Fallback (מעבר למודל פשוט אם החכם נכשל) ואת המפתח API.
+            </div>
+            <div class="edit-when">
+                <span class="label">מתי לערוך:</span>
+                רק אם אתה רוצה להחליף את המודלים עצמם (למשל לשדרג ל-Gemini 3 Pro כשיצא, או לשנות הגדרות טמפרטורה/יצירתיות כלליות לכולם).
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2><span class="section-icon">🎨</span> תצוגה וממשק (Frontend)</h2>
+        <div class="card frontend-card">
+            <div class="file-path">src/app/nutrition/DietitianAgent.tsx</div>
+            <div class="description">
+                <span class="label">מה זה עושה:</span>
+                זהו הרכיב הוויזואלי (ה"פנים" של הדיאטנית). הוא מציג את הכפתורים, הגרפים, הטקסטים והתפריטים למשתמש.
+            </div>
+            <div class="edit-when">
+                <span class="label">מתי לערוך:</span>
+                כשתרצה לשנות עיצוב, להוסיף כפתורים חדשים למסך, לשנות טקסטים שמופיעים בממשק (לא בתשובות ה-AI), או לטפל בשמירה/טעינה של נתונים מה-DB בצד הלקוח.
+            </div>
+        </div>
+    </section>
+
+</div>
+
+</body>
+</html>

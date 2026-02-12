@@ -53,7 +53,6 @@ export default function CalorieMetrics({
     let ignore = false;
     (async () => {
       try {
-        // קבלת ה־uid
         let uid: string | undefined = profile?.user_id;
         if (!uid) {
           const { data } = await supabase.auth.getSession();
@@ -61,7 +60,6 @@ export default function CalorieMetrics({
         }
         if (!uid) { setLoadingLatest(false); return; }
 
-        // שליפת המדידה האחרונה
         const { data, error } = await supabase
           .from('body_measurements')
           .select('weight_kg, body_fat_percent, measured_at')
@@ -131,9 +129,9 @@ export default function CalorieMetrics({
     })();
   }, [profile?.user_id]);
 
-  /* ---------- activity factor + TDEE (עם התאמה ליום מנוחה) ---------- */
+  /* ---------- activity factor + TDEE ---------- */
   const { factor: baseFactor, label: actLabel } = activityMultiplier(activityLevel);
-  const restAdj = restDayAdjustment(activityLevel); // 0..-0.12
+  const restAdj = restDayAdjustment(activityLevel); 
   const effectiveFactor = isRestToday ? Math.max(1.1, round2(baseFactor * (1 + restAdj))) : baseFactor;
   const tdee = bmr ? round2(bmr * effectiveFactor) : null;
 
@@ -184,6 +182,7 @@ export default function CalorieMetrics({
     return () => { ignore = true; };
   }, [currentUserId, defaultPctFromGoals]);
 
+  // שמירת אחוז הגרעון (הגדרות משתמש)
   useEffect(() => {
     if (loadingPct) return;
     if (!currentUserId) return;
@@ -215,9 +214,7 @@ export default function CalorieMetrics({
     let ignore = false;
     (async () => {
       try {
-        // דיפולט עקבי לפי מטרות ואם יש %שומן
         const fallback = defaultGpkFromGoals(goals, hasBf ? (bf as number) : null);
-
         let uid: string | undefined = profile?.user_id;
         if (!uid) {
           const { data } = await supabase.auth.getSession();
@@ -232,7 +229,6 @@ export default function CalorieMetrics({
           .maybeSingle();
 
         if (ignore) return;
-
         if (!error && data && Number.isFinite(Number(data.grams_per_kg))) {
           setGpk(Number(data.grams_per_kg));
         } else {
@@ -279,7 +275,7 @@ export default function CalorieMetrics({
 
   const risk = riskAssessment({ pct, bmr, tdee, targetCalories, hardFloor, gender });
 
-  /* ---------- Macro targets (מושפע מ־isRestToday) ---------- */
+  /* ---------- Macro targets ---------- */
   const macroTargets = useMemo(() => {
     if (!targetCalories || !weight) return null;
 
@@ -287,27 +283,22 @@ export default function CalorieMetrics({
     const lbm = hasBf ? weight * (1 - (bf as number) / 100) : null;
     const basisKg = lbm ?? weight;
 
-    // g/kg בפועל — מה־DB אם נטען, אחרת דיפולט עקבי לפי מטרות ו-%שומן
     const usedGpk = (gpk ?? defaultGpkFromGoals(goals, hasBf ? (bf as number) : null));
 
-    // === Protein first (aligned with ProteinGoals) ===
     const protein_g = round2(basisKg * usedGpk);
     let protein_kcal = protein_g * 4;
 
-    // === Fat: על בסיס BW, עם התאמה קלה ליום מנוחה ===
     const inDeficit = pct >= 10;
     let fatPerKg = inDeficit ? 0.9 : 1.1;
-    fatPerKg = Math.max(fatPerKg, 0.6);       // רצפה 0.6g/kg
-    if (isRestToday) fatPerKg = round2(fatPerKg * 1.1); // +10% ביום מנוחה
+    fatPerKg = Math.max(fatPerKg, 0.6);       
+    if (isRestToday) fatPerKg = round2(fatPerKg * 1.1); 
     let fat_g = round2(weight * fatPerKg);
     let fat_kcal = fat_g * 9;
 
-    // === Carbs: השארית, עם רצפת 130g ===
     let remain_kcal = targetCalories - protein_kcal - fat_kcal;
     let carbs_g = round2(Math.max(130, remain_kcal / 4));
     let carbs_kcal = carbs_g * 4;
 
-    // אם אין מקום לרצפת 130g — חותכים שומן עד 0.6g/kg
     if (remain_kcal < 130 * 4) {
       const fatFloor_g = round2(weight * 0.6);
       const need_kcal = 130 * 4 - remain_kcal;
@@ -328,7 +319,64 @@ export default function CalorieMetrics({
     };
   }, [targetCalories, weight, bf, pct, isRestToday, gpk, goals]);
 
-  /* ----- צבע דינמי לבר ההתקדמות (ירוק בתוך היעד, אדום מעבר) ----- */
+  /* ----- SNAPSHOT SAVE TO DB (UPDATED: Saves Actuals too) ----- */
+  useEffect(() => {
+    if (!currentUserId || loadingLatest || loadingPct || loadingGpk) return;
+    if (!bmr || !tdee || !targetCalories || !macroTargets) return;
+
+    // Debounce save to avoid spamming DB on slider drags
+    const timer = setTimeout(async () => {
+      try {
+        const payload = {
+          user_id: currentUserId,
+          // Targets
+          bmr,
+          tdee,
+          target_calories: targetCalories,
+          target_protein_g: macroTargets.protein_g,
+          target_carbs_g: macroTargets.carbs_g,
+          target_fat_g: macroTargets.fat_g,
+          // Actuals (Current Consumption) - NEW
+          current_calories: calsToday,
+          current_protein_g: p,
+          current_carbs_g: c,
+          current_fat_g: f,
+          
+          deficit_pct: pct,
+          activity_factor: effectiveFactor,
+          updated_at: new Date().toISOString(),
+        };
+
+        const { error } = await supabase.from('user_nutrition_targets').upsert(payload);
+        
+        if (error) {
+            console.error('Failed to save nutrition snapshot:', error);
+        }
+      } catch (err) {
+        console.error('Exception saving snapshot:', err);
+      }
+    }, 1000); 
+
+    return () => clearTimeout(timer);
+  }, [
+    currentUserId, 
+    bmr, 
+    tdee, 
+    targetCalories, 
+    macroTargets, 
+    pct, 
+    effectiveFactor, 
+    loadingLatest, 
+    loadingPct, 
+    loadingGpk,
+    // Add consumption variables to dependency array to trigger save on meal update
+    calsToday, 
+    p, 
+    c, 
+    f
+  ]);
+
+
   const progressBarClass = useMemo(() => {
     if (targetCalories == null) return 'bg-gray-400 dark:bg-gray-500';
     return calsToday <= targetCalories
@@ -336,7 +384,6 @@ export default function CalorieMetrics({
       : 'bg-gradient-to-r from-rose-400 to-rose-600 dark:from-rose-500 dark:to-rose-400';
   }, [calsToday, targetCalories]);
 
-  /* ---------- תצוגה ---------- */
   const usingMeasurement = latest.weightKg != null || latest.bodyFatPercent != null;
   const weightForText = usingMeasurement ? latest.weightKg : profile?.weight_kg;
   const bfForText = usingMeasurement ? latest.bodyFatPercent : profile?.body_fat_percent;
@@ -344,7 +391,6 @@ export default function CalorieMetrics({
   return (
     <SectionCard title="מדדים קלוריים — יעד יומי, פרוגרס ו־7 ימים">
       <div className="grid grid-cols-1 gap-4">
-        {/* יעד + שליטה */}
         <div className="rounded-xl p-4 ring-1 ring-black/10 dark:ring-white/10 bg-gradient-to-br from-white to-black/[.02] dark:from-neutral-900 dark:to-neutral-800">
           <div className="flex items-center justify-between mb-2">
             <div className="text-xs px-2 py-1 rounded bg-black/5 dark:bg-white/10">
@@ -369,7 +415,6 @@ export default function CalorieMetrics({
             />
           </div>
 
-          {/* שליטה: סליידר עם Guardrails */}
           <div className="mt-4 grid gap-2">
             <div className="flex items-center justify-between text-sm">
               <div className="font-medium">בחר/י גרעון/עודף (בטווח הבטוח)</div>
@@ -397,7 +442,6 @@ export default function CalorieMetrics({
             <RiskBox {...risk} />
           </div>
 
-          {/* פרוגרס יומי */}
           <div className="mt-6">
             <div className="flex items-center justify-between text-sm">
               <div className="font-medium">התקדמות היום לעבר היעד</div>
@@ -414,7 +458,6 @@ export default function CalorieMetrics({
             <div className="mt-2 text-xs opacity-80">{remainText}</div>
           </div>
 
-          {/* חלוקת מאקרו — צריכה מול יעד מותאם אישית + ברי פרוגרס */}
           <div className="mt-6 grid grid-cols-1 md-grid-cols-3 md:grid-cols-3 gap-3 text-sm">
             <MacroGoal
               k="חלבון"
@@ -459,7 +502,6 @@ export default function CalorieMetrics({
           </div>
         </div>
 
-        {/* היסטוריה 7 ימים */}
         <div className="rounded-xl p-4 ring-1 ring-black/10 dark:ring-white/10">
           <div className="text-sm opacity-70">7 הימים האחרונים</div>
           <div className="mt-1 text-צxl text-2xl font-semibold">{avg7} קק״ל בממוצע</div>
@@ -481,8 +523,7 @@ export default function CalorieMetrics({
   );
 }
 
-/* ===================== חישובים ===================== */
-
+// ... Helpers (Same as before) ...
 function getAgeYears(profile: Profile | null): number | null {
   if (!profile) return null;
   if (typeof profile.age_years === 'number') return profile.age_years;
@@ -514,15 +555,15 @@ function calcBMR({
 
   if (typeof bfPercent === 'number' && bfPercent >= 0 && bfPercent <= 60) {
     const lbm = weightKg * (1 - bfPercent / 100);
-    return round2(370 + 21.6 * lbm); // Katch–McArdle
+    return round2(370 + 21.6 * lbm);
   }
 
   if (heightCm && ageYears != null) {
     const s = gender === 'female' ? -161 : 5;
-    return round2(10 * weightKg + 6.25 * heightCm - 5 * ageYears + s); // Mifflin–St Jeor
+    return round2(10 * weightKg + 6.25 * heightCm - 5 * ageYears + s);
   }
 
-  const k = gender === 'female' ? 22 : 24; // fallback
+  const k = gender === 'female' ? 22 : 24;
   return round2(k * weightKg);
 }
 
@@ -536,26 +577,17 @@ function activityMultiplier(level: ActivityLevel | null | undefined) {
   }
 }
 
-/** כמה להפחית מהמכפיל ביום מנוחה (כתוספת שלילית יחסית) */
 function restDayAdjustment(level: ActivityLevel | null | undefined) {
   switch (level) {
     case 'sedentary':  return 0;
-    case 'light':      return -0.05; // ~5%
-    case 'moderate':   return -0.10; // ~10%
-    case 'very_active':return -0.12; // ~12%
+    case 'light':      return -0.05;
+    case 'moderate':   return -0.10;
+    case 'very_active':return -0.12;
     default:           return -0.05;
   }
 }
 
-function usePlanTargetWithPct({
-  tdee,
-  pct, // -15..30
-  hardFloor,
-}: {
-  tdee: number | null;
-  pct: number;
-  hardFloor: number;
-}) {
+function usePlanTargetWithPct({ tdee, pct, hardFloor }: { tdee: number | null; pct: number; hardFloor: number; }) {
   const initialTarget = tdee == null ? null : round2(tdee * (1 - pct / 100));
   const targetCalories = initialTarget == null ? null : Math.max(hardFloor, initialTarget);
   const delta = tdee == null || targetCalories == null ? null : round2(targetCalories - tdee);
@@ -576,24 +608,8 @@ function explainDeltaPct(_pct: number, delta: number, tdee: number) {
   return `עודף אפקטיבי של ${delta} קק״ל (~${pctEff}%).`;
 }
 
-/* ===== סיכונים / הסברים ===== */
-function riskAssessment({
-  pct,
-  bmr,
-  tdee,
-  targetCalories,
-  hardFloor,
-  gender,
-}: {
-  pct: number;
-  bmr: number | null;
-  tdee: number | null;
-  targetCalories: number | null;
-  hardFloor: number;
-  gender: Gender;
-}) {
+function riskAssessment({ pct, bmr, tdee, targetCalories, hardFloor }: any) {
   const items: { level: 'ok' | 'caution' | 'danger'; text: string }[] = [];
-
   const deficitPerDay = tdee != null && targetCalories != null ? Math.max(0, tdee - targetCalories) : 0;
   const kgPerWeek = round2((deficitPerDay * 7) / 7700);
   if (pct > 0) {
@@ -607,21 +623,17 @@ function riskAssessment({
       text: `קצב עלייה משוער נמוך (מסה רזה) אם החלבון/אימונים מספקים.`,
     });
   }
-
   if (targetCalories != null && targetCalories === Math.round(hardFloor)) {
     items.push({ level: 'caution', text: 'הפעלנו רצפת בטיחות לקלוריות כדי לא לרדת נמוך מדי (בריאות/ביצועים).' });
   }
-
   if (bmr && targetCalories && targetCalories < bmr) {
     items.push({ level: 'danger', text: `יעד נמוך מ־BMR — סיכון לעייפות, ירידה בביצועים והאטת מטבוליזם.` });
   }
-
   if (pct > 0) {
     items.push({ level: 'ok', text: 'בגרעון מומלץ חלבון גבוה (1.8–2.3g/kg; ואם יש %שומן — לפי LBM).' });
   } else if (pct < 0) {
     items.push({ level: 'ok', text: 'בעודף שמור על חלבון ≥1.6g/kg כדי למקד את העלייה לשריר.' });
   }
-
   if (pct >= 25) {
     items.push({ level: 'danger', text: 'גרעון גבוה מאוד: עלול לפגוע באימונים, הורמונים ומצב רוח. עדיף 15–20%.' });
   } else if (pct >= 20) {
@@ -629,16 +641,12 @@ function riskAssessment({
   } else if (pct >= 10) {
     items.push({ level: 'ok', text: 'גרעון מתון: בר־קיימא, מתאים לריקומפ/חיטוב ארוך.' });
   }
-
   if (!tdee) {
     items.push({ level: 'caution', text: 'חסר נתון לחישוב TDEE מדויק — עדכון גיל/גובה ישפר את ההערכה.' });
   }
-
   const legend = { ok: '✅', caution: '⚠️', danger: '⛔' } as const;
   return { items, legend };
 }
-
-/* ===================== UI bits ===================== */
 
 function KPI({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -675,25 +683,10 @@ function bmrHint(profile: Profile | null) {
   return 'קירוב לפי משקל/מין.';
 }
 
-function MacroGoal({
-  k,
-  consumed_g,
-  consumed_kcal,
-  target_g,
-  target_kcal,
-  note,
-}: {
-  k: string;
-  consumed_g: number;
-  consumed_kcal: number;
-  target_g: number;
-  target_kcal: number;
-  note?: string;
-}) {
+function MacroGoal({ k, consumed_g, consumed_kcal, target_g, target_kcal, note }: any) {
   const pct = target_kcal > 0 ? Math.max(0, Math.min(100, (consumed_kcal / target_kcal) * 100)) : 0;
   const remain_g = round2(target_g - consumed_g);
-  const remainTxt =
-    target_g > 0 ? (remain_g >= 0 ? `נותר ~${remain_g}g` : `חריגה ~${Math.abs(remain_g)}g`) : '—';
+  const remainTxt = target_g > 0 ? (remain_g >= 0 ? `נותר ~${remain_g}g` : `חריגה ~${Math.abs(remain_g)}g`) : '—';
   return (
     <div className="rounded-lg p-3 bg-black/[.03] dark:bg-white/[.06]">
       <div className="font-medium">{k}</div>
@@ -720,18 +713,15 @@ function Row({ dayKey, calories }: { dayKey: string; calories: number }) {
   );
 }
 
-/* ===================== Utils ===================== */
-
 function toNum(v: unknown): number | null {
   if (v == null) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
-/* ---- defaults for protein g/kg (align with ProteinGoals) ---- */
 function defaultGpkFromGoals(goals: UserGoal[], bfPercent: number | null) {
   const has = (k: string) => goals.some((g) => g.goal_key === k);
-  if (has('cutting'))  return bfPercent != null ? 2.3 : 2.0; // אם יש %שומן → LBM*2.3; אחרת כיוונון כללי
+  if (has('cutting'))  return bfPercent != null ? 2.3 : 2.0; 
   if (has('recomp'))   return 2.0;
   if (has('bulking'))  return 1.8;
   return 1.6;

@@ -1,6 +1,8 @@
-// gym-tracker-app\src\app\nutrition\ui.tsx
+// gym-tracker-app/src/app/nutrition/ui.tsx
 
 'use client';
+
+import { useState, useEffect, useRef } from 'react';
 
 export function SectionCard({
   title,
@@ -62,31 +64,76 @@ export function DateTimeField({
   );
 }
 
+// עדכון: TextArea שתומך בהצעות (Autocomplete)
 export function TextArea({
   label,
   value,
   onChange,
   placeholder,
   className = '',
+  suggestions = [],
+  onSelectSuggestion,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   className?: string;
+  suggestions?: string[];
+  onSelectSuggestion?: (s: string) => void;
 }) {
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // סגירת ההצעות כשלוחצים בחוץ
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        setShowSuggestions(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // הצגת ההצעות רק כשיש תוכן בהצעות והמשתמש בפוקוס
+  useEffect(() => {
+    setShowSuggestions(suggestions.length > 0);
+  }, [suggestions]);
+
   return (
-    <label className={`grid gap-1 ${className}`}>
+    <div className={`grid gap-1 relative ${className}`} ref={wrapperRef}>
       <span className="text-sm">{label}</span>
       <textarea
         rows={4}
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={() => { if(suggestions.length > 0) setShowSuggestions(true); }}
         className="w-full min-w-0 rounded-lg border border-black/10 dark:border-white/20 bg-transparent px-3 py-2 text-right
                    focus-visible:outline-none focus:ring-2 focus:ring-foreground/40"
       />
-    </label>
+      
+      {/* רשימת הצעות צפה */}
+      {showSuggestions && onSelectSuggestion && (
+        <div className="absolute top-full mt-1 w-full bg-white dark:bg-neutral-900 border border-black/10 dark:border-white/10 rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
+          {suggestions.map((s, idx) => (
+            <button
+              key={idx}
+              type="button"
+              onClick={() => {
+                onSelectSuggestion(s);
+                setShowSuggestions(false);
+              }}
+              className="w-full text-right px-3 py-2 text-sm hover:bg-black/5 dark:hover:bg-white/10 border-b border-black/5 dark:border-white/5 last:border-0 truncate"
+              title={s}
+            >
+              🕒 {s}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
