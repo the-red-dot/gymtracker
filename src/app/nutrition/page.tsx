@@ -1,3 +1,5 @@
+// gym-tracker-app\src\app\nutrition\page.tsx
+
 'use client';
 
 /* =========================

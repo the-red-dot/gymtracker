@@ -1,10 +1,13 @@
-// src/app/nutrition/CalorieMetrics.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { SectionCard } from './ui';
 import { round2 } from './utils';
+
+/* =========================
+   TYPES & HELPERS
+   ========================= */
 
 type Totals = { calories: number; protein_g: number; carbs_g: number; fat_g: number };
 
@@ -26,11 +29,64 @@ type Profile = {
 };
 type UserGoal = { id: number; goal_key: string; label: string };
 
+// עדכנו את הטיפוס הזה כדי שיכיל נתוני היקפים לחישוב מדויק
 type LatestMeasurement = {
   weightKg: number | null;
-  bodyFatPercent: number | null;
+  bodyFatPercent: number | null; // מהמדידה האחרונה בפועל
   measuredAt: string | null; // ISO
+  // שדות חדשים לחישוב Navy
+  neck_cm: number | null;
+  waist_navel_cm: number | null;
+  waist_cm: number | null;
+  waist_narrow_cm: number | null;
+  hips_cm: number | null;
 };
+
+/* --- Helper: Navy Method Logic (Copied from ProteinGoals to ensure consistency) --- */
+const log10 = (x: number) => Math.log(x) / Math.LN10;
+const toNum = (v: unknown): number | null => {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+function estimateBfFromTape(opts: {
+  gender: Gender | null;
+  height_cm: number | null;
+  neck_cm: number | null;
+  waist_cm_like: number | null; 
+  hips_cm: number | null;
+}): number | null {
+  const cm2in = (cm: number) => cm / 2.54;
+
+  const h = toNum(opts.height_cm);
+  const neck = toNum(opts.neck_cm);
+  const waist = toNum(opts.waist_cm_like);
+  const hips = toNum(opts.hips_cm);
+
+  if (!h || !neck || !waist) return null;
+
+  const hIn = cm2in(h);
+  const neckIn = cm2in(neck);
+  const waistIn = cm2in(waist);
+
+  if (opts.gender === 'female') {
+    if (!hips) return null;
+    const hipsIn = cm2in(hips);
+    const val = 163.205 * log10(waistIn + hipsIn - neckIn) - 97.684 * log10(hIn) - 78.387;
+    return Math.max(2, Math.min(60, round2(val)));
+  } else {
+    // Male default
+    const diff = waistIn - neckIn;
+    if (diff <= 0) return null;
+    const val = 86.010 * log10(diff) - 70.041 * log10(hIn) + 36.76;
+    return Math.max(2, Math.min(50, round2(val)));
+  }
+}
+
+/* =========================
+   COMPONENT
+   ========================= */
 
 export default function CalorieMetrics({
   profile,
@@ -45,8 +101,12 @@ export default function CalorieMetrics({
   todayTotals: Totals;
   last7: DayAgg[];
 }) {
-  /* ---------- טעינת מדידה אחרונה (body_measurements) ---------- */
-  const [latest, setLatest] = useState<LatestMeasurement>({ weightKg: null, bodyFatPercent: null, measuredAt: null });
+  /* ---------- 1. טעינת מדידה אחרונה (כולל חיפוש אחוז שומן היסטורי) ---------- */
+  const [latest, setLatest] = useState<LatestMeasurement>({ 
+    weightKg: null, bodyFatPercent: null, measuredAt: null,
+    neck_cm: null, waist_navel_cm: null, waist_cm: null, waist_narrow_cm: null, hips_cm: null
+  });
+  const [latestManualBf, setLatestManualBf] = useState<number | null>(null);
   const [loadingLatest, setLoadingLatest] = useState<boolean>(true);
 
   useEffect(() => {
@@ -60,24 +120,65 @@ export default function CalorieMetrics({
         }
         if (!uid) { setLoadingLatest(false); return; }
 
-        const { data, error } = await supabase
+        // A. שאילתה ראשית: המדידה האחרונה ביותר (בשביל משקל עדכני והיקפים)
+        const p1 = supabase
           .from('body_measurements')
-          .select('weight_kg, body_fat_percent, measured_at')
+          .select(`
+            weight_kg, 
+            body_fat_percent, 
+            measured_at,
+            neck_cm,
+            waist_cm,
+            waist_navel_cm,
+            waist_narrow_cm,
+            hips_cm
+          `)
           .eq('user_id', uid)
           .order('measured_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
+        // B. שאילתה משנית: אחוז שומן אחרון שאינו NULL (במקרה שהמדידה האחרונה היא רק שקילה)
+        // זה קריטי כדי ליישר קו עם ProteinGoals
+        const p2 = supabase
+          .from('body_measurements')
+          .select('body_fat_percent')
+          .eq('user_id', uid)
+          .not('body_fat_percent', 'is', null)
+          .order('measured_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const [resLatest, resBf] = await Promise.all([p1, p2]);
+
         if (ignore) return;
-        if (!error && data) {
+        
+        // עיבוד נתונים
+        if (!resLatest.error && resLatest.data) {
+          const d = resLatest.data;
           setLatest({
-            weightKg: toNum(data.weight_kg),
-            bodyFatPercent: toNum(data.body_fat_percent),
-            measuredAt: data.measured_at ?? null,
+            weightKg: toNum(d.weight_kg),
+            bodyFatPercent: toNum(d.body_fat_percent),
+            measuredAt: d.measured_at ?? null,
+            neck_cm: toNum(d.neck_cm),
+            waist_cm: toNum(d.waist_cm),
+            waist_navel_cm: toNum(d.waist_navel_cm),
+            waist_narrow_cm: toNum(d.waist_narrow_cm),
+            hips_cm: toNum(d.hips_cm),
           });
         } else {
-          setLatest({ weightKg: null, bodyFatPercent: null, measuredAt: null });
+          setLatest({ 
+            weightKg: null, bodyFatPercent: null, measuredAt: null,
+            neck_cm: null, waist_navel_cm: null, waist_cm: null, waist_narrow_cm: null, hips_cm: null
+          });
         }
+
+        if (!resBf.error && resBf.data) {
+          setLatestManualBf(toNum(resBf.data.body_fat_percent));
+        } else {
+          setLatestManualBf(null);
+        }
+
       } finally {
         if (!ignore) setLoadingLatest(false);
       }
@@ -85,13 +186,36 @@ export default function CalorieMetrics({
     return () => { ignore = true; };
   }, [profile?.user_id]);
 
-  /* ---------- נתוני בסיס (מעודכנים לפי מדידה) ---------- */
-  const weight = latest.weightKg ?? profile?.weight_kg ?? null;
-  const heightCm = profile?.height_cm ?? null;
-  const bf = latest.bodyFatPercent ?? profile?.body_fat_percent ?? null;
-  const ageYears = getAgeYears(profile);
+  /* ---------- 2. חישוב נתוני בסיס חכמים (עקביים ל-ProteinGoals) ---------- */
   const gender = (profile?.gender ?? 'unspecified') as Gender;
+  const heightCm = profile?.height_cm ?? null;
+  const weight = latest.weightKg ?? profile?.weight_kg ?? null;
+  const ageYears = getAgeYears(profile);
 
+  // סדר קדימויות ל-BF:
+  // 1. מדידה ידנית ברשומה האחרונה
+  // 2. מדידה ידנית היסטורית
+  // 3. פרופיל
+  // 4. חישוב Navy מהיקפים
+  const calculatedBf = useMemo(() => {
+    const manual = latest.bodyFatPercent ?? latestManualBf ?? profile?.body_fat_percent;
+    if (manual != null) return manual;
+    
+    const waistLike = latest.waist_navel_cm ?? latest.waist_cm ?? latest.waist_narrow_cm;
+    
+    return estimateBfFromTape({
+      gender,
+      height_cm: heightCm,
+      neck_cm: latest.neck_cm,
+      waist_cm_like: waistLike,
+      hips_cm: latest.hips_cm,
+    });
+  }, [latest, latestManualBf, profile?.body_fat_percent, gender, heightCm]);
+
+  // fallback סופי
+  const bf = calculatedBf ?? null;
+  
+  // חישוב BMR
   const bmr = calcBMR({
     weightKg: weight,
     heightCm,
@@ -204,8 +328,15 @@ export default function CalorieMetrics({
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [pct, currentUserId, loadingPct]);
 
-  /* ---------- Protein g/kg (Persisted) ---------- */
-  const [gpk, setGpk] = useState<number | null>(null);
+  /* ---------- Protein g/kg (Persisted + LocalStorage Check) ---------- */
+  // עדכון קריטי: בדיקת localStorage כדי לקבל את הערך שהוגדר בטאב השני מיידית
+  const [gpk, setGpk] = useState<number | null>(() => {
+    if (typeof window !== 'undefined') {
+      const ls = localStorage.getItem('protein_gpk');
+      if (ls) return Number(ls);
+    }
+    return null;
+  });
   const [loadingGpk, setLoadingGpk] = useState<boolean>(true);
 
   const hasBf = typeof bf === 'number' && bf >= 0 && bf <= 60;
@@ -220,7 +351,12 @@ export default function CalorieMetrics({
           const { data } = await supabase.auth.getSession();
           uid = data.session?.user?.id;
         }
-        if (!uid) { setGpk(fallback); setLoadingGpk(false); return; }
+        
+        if (!uid) { 
+          setGpk(prev => prev ?? fallback); 
+          setLoadingGpk(false); 
+          return; 
+        }
 
         const { data, error } = await supabase
           .from('user_protein_settings')
@@ -229,10 +365,14 @@ export default function CalorieMetrics({
           .maybeSingle();
 
         if (ignore) return;
+        
         if (!error && data && Number.isFinite(Number(data.grams_per_kg))) {
-          setGpk(Number(data.grams_per_kg));
+          const val = Number(data.grams_per_kg);
+          setGpk(val);
+          // מסנכרנים את ה-LS גם מכאן
+          if (typeof window !== 'undefined') localStorage.setItem('protein_gpk', String(val));
         } else {
-          setGpk(fallback);
+          setGpk(prev => prev ?? fallback);
         }
       } finally {
         if (!ignore) setLoadingGpk(false);
@@ -275,37 +415,50 @@ export default function CalorieMetrics({
 
   const risk = riskAssessment({ pct, bmr, tdee, targetCalories, hardFloor, gender });
 
-  /* ---------- Macro targets ---------- */
+  /* ---------- Macro targets (THE FIX IS HERE) ---------- */
   const macroTargets = useMemo(() => {
     if (!targetCalories || !weight) return null;
 
     const hasBf = typeof bf === 'number' && bf >= 0 && bf <= 60;
     const lbm = hasBf ? weight * (1 - (bf as number) / 100) : null;
+    
+    // בסיס החישוב: אם יש מסה רזה (LBM) משתמשים בה, אחרת במשקל כולל
     const basisKg = lbm ?? weight;
 
+    // כאן usedGpk יקבל את הערך הנכון (מ-LS או מה-DB) שזהה לטאב השני
     const usedGpk = (gpk ?? defaultGpkFromGoals(goals, hasBf ? (bf as number) : null));
 
     const protein_g = round2(basisKg * usedGpk);
     let protein_kcal = protein_g * 4;
 
     const inDeficit = pct >= 10;
-    let fatPerKg = inDeficit ? 0.9 : 1.1;
+    // TWEAK: הורדתי ל-0.8 בגרעון כדי לאפשר יותר פחמימות לאימונים
+    let fatPerKg = inDeficit ? 0.8 : 1.0;
+    
+    // Floor of 0.6g/kg absolute minimum for hormonal health
     fatPerKg = Math.max(fatPerKg, 0.6);       
+    
     if (isRestToday) fatPerKg = round2(fatPerKg * 1.1); 
+    
+    // חישוב שומן לפי משקל כולל (סטנדרט)
     let fat_g = round2(weight * fatPerKg);
     let fat_kcal = fat_g * 9;
 
     let remain_kcal = targetCalories - protein_kcal - fat_kcal;
+    // הבטחת מינימום 130ג פחמימות (מוח/ביצועים)
     let carbs_g = round2(Math.max(130, remain_kcal / 4));
     let carbs_kcal = carbs_g * 4;
 
+    // מנגנון "לחץ": אם אין מספיק קלוריות לפחמימות המינימליות, נוריד שומן עד הרצפה
     if (remain_kcal < 130 * 4) {
-      const fatFloor_g = round2(weight * 0.6);
+      const fatFloor_g = round2(weight * 0.6); // רצפת שומן קשיחה
       const need_kcal = 130 * 4 - remain_kcal;
       const canDropFat_kcal = Math.max(0, (fat_g - fatFloor_g) * 9);
       const drop = Math.min(need_kcal, canDropFat_kcal);
+      
       fat_kcal = Math.max(fat_kcal - drop, fatFloor_g * 9);
       fat_g = round2(fat_kcal / 9);
+      
       remain_kcal = targetCalories - protein_kcal - fat_kcal;
       carbs_g = round2(Math.max(130, remain_kcal / 4));
       carbs_kcal = carbs_g * 4;
@@ -319,39 +472,32 @@ export default function CalorieMetrics({
     };
   }, [targetCalories, weight, bf, pct, isRestToday, gpk, goals]);
 
-  /* ----- SNAPSHOT SAVE TO DB (UPDATED: Saves Actuals too) ----- */
+  /* ----- SNAPSHOT SAVE TO DB ----- */
   useEffect(() => {
     if (!currentUserId || loadingLatest || loadingPct || loadingGpk) return;
     if (!bmr || !tdee || !targetCalories || !macroTargets) return;
 
-    // Debounce save to avoid spamming DB on slider drags
     const timer = setTimeout(async () => {
       try {
         const payload = {
           user_id: currentUserId,
-          // Targets
           bmr,
           tdee,
           target_calories: targetCalories,
           target_protein_g: macroTargets.protein_g,
           target_carbs_g: macroTargets.carbs_g,
           target_fat_g: macroTargets.fat_g,
-          // Actuals (Current Consumption) - NEW
           current_calories: calsToday,
           current_protein_g: p,
           current_carbs_g: c,
           current_fat_g: f,
-          
           deficit_pct: pct,
           activity_factor: effectiveFactor,
           updated_at: new Date().toISOString(),
         };
 
         const { error } = await supabase.from('user_nutrition_targets').upsert(payload);
-        
-        if (error) {
-            console.error('Failed to save nutrition snapshot:', error);
-        }
+        if (error) console.error('Failed to save nutrition snapshot:', error);
       } catch (err) {
         console.error('Exception saving snapshot:', err);
       }
@@ -359,21 +505,8 @@ export default function CalorieMetrics({
 
     return () => clearTimeout(timer);
   }, [
-    currentUserId, 
-    bmr, 
-    tdee, 
-    targetCalories, 
-    macroTargets, 
-    pct, 
-    effectiveFactor, 
-    loadingLatest, 
-    loadingPct, 
-    loadingGpk,
-    // Add consumption variables to dependency array to trigger save on meal update
-    calsToday, 
-    p, 
-    c, 
-    f
+    currentUserId, bmr, tdee, targetCalories, macroTargets, pct, effectiveFactor, 
+    loadingLatest, loadingPct, loadingGpk, calsToday, p, c, f
   ]);
 
 
@@ -386,7 +519,9 @@ export default function CalorieMetrics({
 
   const usingMeasurement = latest.weightKg != null || latest.bodyFatPercent != null;
   const weightForText = usingMeasurement ? latest.weightKg : profile?.weight_kg;
-  const bfForText = usingMeasurement ? latest.bodyFatPercent : profile?.body_fat_percent;
+  
+  // תצוגת טקסט: אם חושב BF לפי Navy, נציג אותו
+  const bfForText = bf; 
 
   return (
     <SectionCard title="מדדים קלוריים — יעד יומי, פרוגרס ו־7 ימים">
@@ -490,8 +625,9 @@ export default function CalorieMetrics({
                 היעדים מתבססים על BMR/TDEE מחושבים לפי <b>המדידה האחרונה</b>
                 {latest.measuredAt ? ` (${new Date(latest.measuredAt).toLocaleDateString('he-IL')})` : ''}:
                 משקל {weightForText ?? '—'} ק״ג
-                {typeof bfForText === 'number' ? ` ואחוז שומן ${bfForText}%` : ''}. ביום מנוחה מקדם הפעילות יורד במעט,
-                פחמימות יורדות ושומן עולה במעט; עם רצפת פחמימות של ~130g.
+                {typeof bfForText === 'number' ? ` ואחוז שומן ${bfForText}%` : ''}
+                {calculatedBf !== latest.bodyFatPercent && calculatedBf != null ? ' (מחושב לפי היקפים)' : ''}
+                . ביום מנוחה מקדם הפעילות יורד במעט, פחמימות יורדות ושומן עולה במעט; עם רצפת פחמימות של ~130g.
               </>
             ) : (
               <>
@@ -504,7 +640,7 @@ export default function CalorieMetrics({
 
         <div className="rounded-xl p-4 ring-1 ring-black/10 dark:ring-white/10">
           <div className="text-sm opacity-70">7 הימים האחרונים</div>
-          <div className="mt-1 text-צxl text-2xl font-semibold">{avg7} קק״ל בממוצע</div>
+          <div className="mt-1 text-2xl font-semibold">{avg7} קק״ל בממוצע</div>
 
           <div className="mt-3 text-sm grid gap-1">
             {last7.map((d) => (
@@ -711,12 +847,6 @@ function Row({ dayKey, calories }: { dayKey: string; calories: number }) {
       <div className="font-medium">{round2(calories)} קק״ל</div>
     </div>
   );
-}
-
-function toNum(v: unknown): number | null {
-  if (v == null) return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
 }
 
 function defaultGpkFromGoals(goals: UserGoal[], bfPercent: number | null) {
