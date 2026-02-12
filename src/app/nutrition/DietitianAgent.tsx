@@ -94,6 +94,9 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
     cooking_preference: 'quick'
   });
 
+  // State נפרד להקלדה חלקה של העדפות תזונה (מונע קפיצות ומחיקת רווחים)
+  const [dietaryInput, setDietaryInput] = useState('');
+
   useEffect(() => {
     loadAllData();
   }, [userId]);
@@ -114,6 +117,8 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
     if (data) {
       setProfile(data);
       setFormData(data);
+      // עדכון ה-State של ההקלדה החופשית
+      setDietaryInput(data.dietary_preferences?.join(', ') || '');
       setView('dashboard');
       // Set initial view based on what exists
       if (data.last_daily_analysis_html) {
@@ -190,11 +195,20 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
 
   async function saveProfile() {
     setLoading(true);
-    const { error } = await supabase.from('user_dietitian_profile').upsert({ user_id: userId, ...formData });
+    
+    // ניקוי הרווחים (trim) והמרה למערך נעשים רק בזמן השמירה כדי לאפשר למשתמש להקליד בנוחות
+    const cleanedPreferences = dietaryInput.split(',').map(s => s.trim()).filter(Boolean);
+    const cleanedData = {
+      ...formData,
+      dietary_preferences: cleanedPreferences
+    };
+
+    const { error } = await supabase.from('user_dietitian_profile').upsert({ user_id: userId, ...cleanedData });
     if (!error) {
-      setProfile(formData);
+      setProfile(cleanedData);
+      setFormData(cleanedData);
       setView('dashboard');
-      if (!profile) handleAnalyze('daily', formData); 
+      if (!profile) handleAnalyze('daily', cleanedData); 
     }
     setLoading(false);
   }
@@ -406,7 +420,13 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
             </label>
             <label className="block">
               <span className="text-sm font-medium">העדפות תזונה</span>
-              <input type="text" className="w-full mt-1 p-2 rounded-lg border border-black/10 dark:border-white/20 bg-transparent" placeholder="צמחוני, פליאו, ללא גלוטן..." value={formData.dietary_preferences.join(', ')} onChange={e => setFormData({...formData, dietary_preferences: e.target.value.split(',').map(s => s.trim())})} />
+              <input 
+                  type="text" 
+                  className="w-full mt-1 p-2 rounded-lg border border-black/10 dark:border-white/20 bg-transparent" 
+                  placeholder="צמחוני, פליאו, ללא גלוטן..." 
+                  value={dietaryInput} 
+                  onChange={e => setDietaryInput(e.target.value)} 
+              />
             </label>
             <label className="block">
                <span className="text-sm font-medium">מידע רפואי / תרופות ותוספים</span>
