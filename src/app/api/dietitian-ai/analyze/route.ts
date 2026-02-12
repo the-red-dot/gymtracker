@@ -1,6 +1,7 @@
 import { callGeminiWithFallback } from '@/lib/ai-client';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60; // אפשור זמן ריצה ארוך יותר ב-Vercel
 
 export async function POST(req: Request) {
   try {
@@ -23,6 +24,10 @@ export async function POST(req: Request) {
     const genderTerm = userProfile?.gender === 'female' ? 'female' : 'male';
     const hebrewGender = userProfile?.gender === 'female' ? 'נקבה' : 'זכר';
     
+    // שליפת שעת שינה וחישוב שעה נוכחית (IL timezone)
+    const sleepTime = preferences?.schedule_info?.sleep || '23:00';
+    const currentTime = new Date().toLocaleTimeString('he-IL', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' });
+
     // חישוב מדויק של גיל מתוך תאריך הלידה
     let ageStr = 'לא ידוע';
     const bDateStr = userProfile?.birth_date || userProfile?.birth_data; // תמיכה בשני השמות למקרה של טעות הקלדה ב-DB
@@ -72,20 +77,29 @@ export async function POST(req: Request) {
     
     if (mode === 'daily') {
       specificInstructions = `
-        **Daily Review Focus:**
-        1. **Compare ACTUAL vs TARGETS:** Use the "REAL-TIME DASHBOARD STATUS" section above as the source of truth for today. Compare it with the specific food logs.
-        2. **Identify immediate gaps:** (e.g., "You are 20g short on protein based on your dashboard").
-        3. **Suggest ONE specific immediate fix:** for tomorrow based on preferences.
-        4. Keep it short and motivating.
+        **Daily Review Focus (TIME AWARENESS IS CRITICAL):**
+        **Current Time:** ${currentTime}
+        **User Sleeps at:** ${sleepTime}
+        
+        1. **Contextual Analysis:** You MUST account for the time of day.
+           - If it is ${currentTime} and the user sleeps at ${sleepTime}, realize the day is NOT over.
+           - **DO NOT PANIC** about low calories/protein if there are many hours left until sleep.
+           - Instead of saying "You are in a huge deficit!", say "You have X hours left and Y calories remaining to hit your goal."
+           - Only warn about severe deficits if it is very late (close to sleep time).
+
+        2. **Compare ACTUAL vs TARGETS:** Use the "REAL-TIME DASHBOARD STATUS" section above.
+        3. **Identify immediate gaps:** based on what is reasonable to consume in the *remaining time*.
+        4. **Suggest ONE specific immediate fix:** for the rest of today (if time permits) or for tomorrow.
+        5. Keep it short and motivating.
       `;
     } else { // weekly
       specificInstructions = `
         **Weekly Review Focus:**
         1. **Pattern Recognition:** Analyze the Food Logs (last 7 days). Identify repeated foods or habits. Are they aligned with the "REAL-TIME DASHBOARD STATUS" goals (Macros/Calories)?
         2. **Weight vs. Deficit:** Check the "Weight History". Compare the trend to the 'Planned Deficit' in the Dashboard data. 
-           - IF weight dropped & deficit matches -> Praise.
-           - IF weight stalled but deficit was hit -> Explain water retention/plateau.
-           - IF weight up & deficit missed -> Gently explain the correlation using the food logs as evidence.
+            - IF weight dropped & deficit matches -> Praise.
+            - IF weight stalled but deficit was hit -> Explain water retention/plateau.
+            - IF weight up & deficit missed -> Gently explain the correlation using the food logs as evidence.
         3. **Vitamins & Micronutrients Deep Dive:** Thoroughly analyze the food logs for vitamins and minerals. Explicitly state which vitamins/minerals they are consuming adequately (based on their food choices) and which ones are likely missing or deficient.
         4. **Age & Gender Context:** Tailor your insights specifically for a ${ageStr}-year-old ${genderTerm}. Explain how their age and gender affect their nutritional needs (e.g., iron, calcium, metabolism changes) and evaluate if their current diet supports this.
         5. **Medication/Supplements:** Consider this info: "${medicalInfo || 'None'}". If relevant, explain interaction with their diet.
@@ -125,14 +139,14 @@ export async function POST(req: Request) {
       **Output Structure (Hebrew HTML only):**
       
       ${mode === 'daily' ? `
-        <h3>📅 סקירה יומית (${new Date().toLocaleDateString('he-IL')})</h3>
-        <p>[Analysis of today's performance vs Dashboard targets]</p>
+        <h3>📅 סקירה יומית (${new Date().toLocaleDateString('he-IL')}) - שעה ${currentTime}</h3>
+        <p>[Analysis of today's performance vs targets, CONSIDERING THE TIME LEFT]</p>
         
         <h3>🍽️ פידבק על הארוחות</h3>
         <p>[Specific comments on what was eaten, citing specific foods]</p>
         
-        <h3>💡 המלצה למחר</h3>
-        <p>[One actionable tip]</p>
+        <h3>💡 המלצה להמשך היום / למחר</h3>
+        <p>[One actionable tip based on remaining time]</p>
       ` : `
         <h3>📊 סיכום שבוע ומגמות</h3>
         <p>[Analysis of the last 7 days consistency and adherence to targets]</p>

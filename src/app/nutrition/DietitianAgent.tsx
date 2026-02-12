@@ -213,6 +213,15 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
     setLoading(false);
   }
 
+  // --- Helper to get headers with API Key ---
+  const getAuthHeaders = () => {
+    const customKey = typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') : null;
+    return {
+      'Content-Type': 'application/json',
+      ...(customKey ? { 'x-custom-api-key': customKey } : {})
+    };
+  };
+
   // --- API Calls ---
 
   async function handleAnalyze(mode: 'daily' | 'weekly' = 'daily', currentProfile = profile) {
@@ -244,7 +253,7 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
     try {
       const res = await fetch('/api/dietitian-ai/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(), // שימוש ב-Helper החדש
         body: JSON.stringify({
           userId,
           mode, 
@@ -291,7 +300,7 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
         
         const res = await fetch('/api/dietitian-ai/generate-plan', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(), // שימוש ב-Helper החדש
             body: JSON.stringify({
               userId,
               userProfile: { goals: userGoals },
@@ -322,7 +331,7 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
     try {
         const res = await fetch('/api/dietitian-ai/recommend', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(), // שימוש ב-Helper החדש
             body: JSON.stringify({
               userId,
               preferences: profile,
@@ -353,7 +362,7 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
       try {
         const res = await fetch('/api/dietitian-ai/recipe', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(), // שימוש ב-Helper החדש
             body: JSON.stringify({
               userId,
               preferences: profile,
@@ -465,55 +474,55 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
 
       {/* --- Section 1: Insight / Status (TABS System) --- */}
       <SectionCard title="סקירת מצב נוכחית">
-         
-         {/* --- כפתורי ניווט בין סקירות --- */}
-         <div className="flex gap-2 mb-4 border-b border-black/10 dark:border-white/10 pb-2">
-            <button 
+          
+          {/* --- כפתורי ניווט בין סקירות --- */}
+          <div className="flex gap-2 mb-4 border-b border-black/10 dark:border-white/10 pb-2">
+             <button 
                onClick={() => setDisplayMode('daily')}
                className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
                    displayMode === 'daily' 
                    ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 border-b-2 border-indigo-500' 
                    : 'opacity-60 hover:opacity-100'
                }`}
-            >
+             >
                 📅 סקירה יומית
-            </button>
-            <button 
+             </button>
+             <button 
                onClick={() => setDisplayMode('weekly')}
                className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
                    displayMode === 'weekly' 
                    ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border-b-2 border-purple-500' 
                    : 'opacity-60 hover:opacity-100'
                }`}
-            >
+             >
                 📊 סקירה שבועית
-            </button>
-         </div>
+             </button>
+          </div>
 
-         {/* --- תוכן הסקירה הנבחרת --- */}
-         <div className="min-h-[150px]">
-             {displayMode === 'daily' ? (
-                 profile?.last_daily_analysis_html ? (
-                     <div className="prose prose-sm dark:prose-invert max-w-none animate-in fade-in" dangerouslySetInnerHTML={{ __html: profile.last_daily_analysis_html }} />
-                 ) : (
-                     <div className="text-center py-8 opacity-70 bg-black/5 dark:bg-white/5 rounded-lg">
-                         אין עדיין סקירה יומית.
-                     </div>
-                 )
-             ) : (
-                 profile?.last_weekly_analysis_html ? (
-                     <div className="prose prose-sm dark:prose-invert max-w-none animate-in fade-in" dangerouslySetInnerHTML={{ __html: profile.last_weekly_analysis_html }} />
-                 ) : (
-                     <div className="text-center py-8 opacity-70 bg-black/5 dark:bg-white/5 rounded-lg">
-                         אין עדיין סקירה שבועית.
-                     </div>
-                 )
-             )}
-         </div>
-         
-         {/* --- כפתור יצירת סקירה חדשה - מותאם אישית לטאב --- */}
-         <div className="mt-6 pt-4 border-t border-black/10 dark:border-white/10 flex justify-end">
-            <button 
+          {/* --- תוכן הסקירה הנבחרת --- */}
+          <div className="min-h-[150px]">
+              {displayMode === 'daily' ? (
+                  profile?.last_daily_analysis_html ? (
+                      <div className="prose prose-sm dark:prose-invert max-w-none animate-in fade-in" dangerouslySetInnerHTML={{ __html: profile.last_daily_analysis_html }} />
+                  ) : (
+                      <div className="text-center py-8 opacity-70 bg-black/5 dark:bg-white/5 rounded-lg">
+                          אין עדיין סקירה יומית.
+                      </div>
+                  )
+              ) : (
+                  profile?.last_weekly_analysis_html ? (
+                      <div className="prose prose-sm dark:prose-invert max-w-none animate-in fade-in" dangerouslySetInnerHTML={{ __html: profile.last_weekly_analysis_html }} />
+                  ) : (
+                      <div className="text-center py-8 opacity-70 bg-black/5 dark:bg-white/5 rounded-lg">
+                          אין עדיין סקירה שבועית.
+                      </div>
+                  )
+              )}
+          </div>
+          
+          {/* --- כפתור יצירת סקירה חדשה - מותאם אישית לטאב --- */}
+          <div className="mt-6 pt-4 border-t border-black/10 dark:border-white/10 flex justify-end">
+             <button 
                 onClick={() => handleAnalyze(displayMode)} 
                 disabled={analyzing}
                 className={`py-2 px-4 rounded-lg font-medium text-sm transition disabled:opacity-50 flex justify-center items-center gap-2 ${
@@ -521,14 +530,14 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
                     ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40' 
                     : 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/40'
                 }`}
-            >
+             >
                 {analyzing && analysisMode === displayMode ? (
                     <><span className="animate-spin">⌛</span> מייצר סקירה חדשה...</>
                 ) : (
                     <>🔄 עדכן סקירה {displayMode === 'daily' ? 'יומית' : 'שבועית'} מחדש</>
                 )}
-            </button>
-         </div>
+             </button>
+          </div>
       </SectionCard>
 
       <div className="grid md:grid-cols-2 gap-6">
