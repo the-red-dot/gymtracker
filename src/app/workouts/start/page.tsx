@@ -59,6 +59,11 @@ const PLACEHOLDER_IMG =
   </g>
 </svg>
 `.trim());
+
+// זיהוי פשוט לתרגילי קרדיו לפי שם
+const isCardioCheck = (name: string) => {
+  return /run|treadmill|row|bike|cycling|elliptical|ski|swim|walk|airdyne|crosstrainer|הליכון|ריצה|אופניים|חתירה|אליפטי/i.test(name);
+};
 // ===== End Section 2 =====
 
 
@@ -79,6 +84,10 @@ export default function StartWorkoutPage() {
   const [startedAt, setStartedAt] = useState<string | null>(null); // ISO
   const [endedAt, setEndedAt] = useState<string | null>(null);
 
+  // Inactivity Logic State
+  const [lastActivity, setLastActivity] = useState<number>(Date.now());
+  const [isAutoPaused, setIsAutoPaused] = useState<boolean>(false);
+
   // Exercises for this workout (or planned before start)
   const [exercises, setExercises] = useState<WorkoutExercise[]>([]);
 
@@ -97,17 +106,63 @@ export default function StartWorkoutPage() {
   const [finishedWe, setFinishedWe] = useState<Record<number, boolean>>({});
   const [activeWeId, setActiveWeId] = useState<number | null>(null); // last exercise we added a set to
 
+  // Mobile UX State: Active exercise index (using order_index instead of ID for stability)
+  const [mobileActiveIndex, setMobileActiveIndex] = useState<number | null>(null);
+
   // Rest-day flag
   const [isRestToday, setIsRestToday] = useState<boolean>(false);
 
-  // Timer
+  // Helper to register user activity (resets the inactivity timer)
+  const registerActivity = () => {
+    setLastActivity(Date.now());
+    if (isAutoPaused) setIsAutoPaused(false);
+  };
+
+  // Timer Logic (With Auto-Pause support)
   const [elapsed, setElapsed] = useState(0); // seconds
   useEffect(() => {
     if (!startedAt || endedAt) return;
+    
     const startMs = +new Date(startedAt);
-    const t = setInterval(() => setElapsed(Math.max(0, Math.floor((Date.now() - startMs) / 1000))), 1000);
+    
+    // If auto-paused, freeze time at the moment pause started (lastActivity + 30 mins)
+    if (isAutoPaused) {
+       // Pause started 30 mins after last activity
+       const pauseTime = lastActivity + (30 * 60 * 1000); 
+       setElapsed(Math.max(0, Math.floor((pauseTime - startMs) / 1000)));
+       return;
+    }
+
+    const t = setInterval(() => {
+        setElapsed(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
+    }, 1000);
     return () => clearInterval(t);
-  }, [startedAt, endedAt]);
+  }, [startedAt, endedAt, isAutoPaused, lastActivity]);
+
+  // Inactivity Monitor Effect
+  useEffect(() => {
+    if (!workoutId || endedAt) return; // Only monitor active workouts
+
+    const checkInterval = setInterval(() => {
+        const now = Date.now();
+        const diff = now - lastActivity;
+        const THIRTY_MIN = 30 * 60 * 1000;
+
+        // 1. Auto-Pause after 30 mins inactivity
+        if (!isAutoPaused && diff > THIRTY_MIN) {
+            setIsAutoPaused(true);
+        }
+
+        // 2. Auto-Finish after another 30 mins (Total 60 mins inactivity)
+        if (isAutoPaused && diff > THIRTY_MIN * 2) {
+            // Finish time should be when it effectively paused (lastActivity + 30m)
+            const autoEndTime = new Date(lastActivity + THIRTY_MIN).toISOString();
+            finishWorkout(autoEndTime);
+        }
+    }, 10000); // Check every 10 seconds
+
+    return () => clearInterval(checkInterval);
+  }, [workoutId, endedAt, lastActivity, isAutoPaused]);
 
   // ----- helpers to reset ui without navigation -----
   const resetToPlanning = () => {
@@ -122,6 +177,9 @@ export default function StartWorkoutPage() {
     setExpanded({});
     setHistoryByEquip({});
     setError(null);
+    setMobileActiveIndex(null);
+    setIsAutoPaused(false);
+    setLastActivity(Date.now());
   };
 
   // Bootstrap: auth + tabs + either resume or wait for user to choose a tab + rest-flag
@@ -175,6 +233,9 @@ export default function StartWorkoutPage() {
         setWorkoutId(active.id);
         setStartedAt(active.started_at);
         setEndedAt(active.ended_at);
+        
+        // Reset activity timer on resume
+        setLastActivity(Date.now());
 
         const { data: wex, error: wexErr } = await supabase
           .from('workout_exercises')
@@ -282,6 +343,8 @@ export default function StartWorkoutPage() {
     if (exercises.length === 0) { setError('לטאב שנבחר אין תרגילים.'); return; }
 
     setError(null);
+    registerActivity(); // Activity!
+
     const nowIso = new Date().toISOString();
     const { data: w, error: werr } = await supabase
       .from('workouts')
@@ -321,10 +384,10 @@ export default function StartWorkoutPage() {
   const loadHistory = async (equipmentId: number) => {
     if (!userId) return;
     setHistoryBusy((m) => ({ ...m, [equipmentId]: true }));
+    registerActivity(); // User interaction count as activity
 
     try {
-      // 1) Find last 7 workout_exercises for this equipment (joined with workouts to filter user & sort by date)
-      // במקום לסנן לפי תאריך (gte), אנו לוקחים את ה-7 האחרונים בהם התרגיל בוצע
+      // 1) Find last 7 workout_exercises for this equipment
       const { data: wexRows, error: wexErr } = await supabase
         .from('workout_exercises')
         .select('id, workout_id, workouts!inner(started_at, user_id)')
@@ -347,7 +410,6 @@ export default function StartWorkoutPage() {
 
       const weIds = wexRows.map((r: any) => r.id);
       
-      // Map needed for constructing the rows later (workout_id -> started_at)
       const workoutMeta = new Map<number, string>();
       wexRows.forEach((r: any) => {
         if (r.workouts?.started_at) {
@@ -369,7 +431,6 @@ export default function StartWorkoutPage() {
       }
 
       const rows: HistoryRow[] = (sets ?? []).map((s) => {
-        // Find matching workout_id via workout_exercise_id
         const parentWe = wexRows.find((r: any) => r.id === s.workout_exercise_id);
         const wid = parentWe ? parentWe.workout_id : 0;
         
@@ -384,7 +445,6 @@ export default function StartWorkoutPage() {
         };
       });
 
-      // Sort by workout started_at desc; within workout keep set order
       rows.sort((a, b) => +new Date(b.started_at) - +new Date(a.started_at) || a.set_index - b.set_index);
 
       setHistoryByEquip((m) => ({ ...m, [equipmentId]: rows }));
@@ -415,6 +475,8 @@ export default function StartWorkoutPage() {
       return;
     }
 
+    registerActivity(); // Activity!
+
     const nextIndex = (ex.sets[ex.sets.length - 1]?.set_index ?? 0) + 1;
 
     const { data, error } = await supabase
@@ -438,12 +500,13 @@ export default function StartWorkoutPage() {
       }
       return prev;
     });
-    setActiveWeId(weId); // current one becomes active (not green yet)
+    setActiveWeId(weId); 
 
     // Update local sets
     setExercises((prev) =>
       prev.map((e) => (e.id === weId ? { ...e, sets: [...e.sets, data as ExerciseSet] } : e))
     );
+    // Keep form values if mobile modal, otherwise might reset - standard behavior is to reset
     setNewSetByEx((prev) => ({ ...prev, [weId]: { weight: '', reps: '', distance: '' } }));
 
     // focus back to weight
@@ -458,6 +521,9 @@ export default function StartWorkoutPage() {
   const removeSet = async (weId: number, setId: number) => {
     const ok = confirm('למחוק את הסט?');
     if (!ok) return;
+    
+    registerActivity(); // Activity!
+
     const { error } = await supabase.from('exercise_sets').delete().eq('id', setId);
     if (error) { setError(error.message); return; }
     setExercises((prev) =>
@@ -465,20 +531,20 @@ export default function StartWorkoutPage() {
     );
   };
 
-  const finishWorkout = async () => {
+  // Optional customEndTime allows finishing workout at a past timestamp (for auto-finish)
+  const finishWorkout = async (customEndTime?: string) => {
     if (!workoutId) return;
-    const endIso = new Date().toISOString();
+    
+    registerActivity(); 
+
+    const endIso = customEndTime || new Date().toISOString();
     const { error } = await supabase.from('workouts').update({ ended_at: endIso }).eq('id', workoutId);
     if (error) { setError(error.message); return; }
     setEndedAt(endIso);
-
-    // ❌ אל תנווט לעמוד התקדמות שבוטל
-    // ❌ אל תציג כפתור "לצפייה בהתקדמות"
   };
 
   // ---- Deep cancel without navigation (fix 404) ----
   const cancelWorkout = async () => {
-    // אם אין אימון פעיל — פשוט איפוס UI, בלי ניתוב
     if (!workoutId) { resetToPlanning(); return; }
 
     const msg = endedAt
@@ -488,7 +554,6 @@ export default function StartWorkoutPage() {
     if (!ok) return;
 
     try {
-      // מוחקים קודם סטים, אח״כ תרגילי אימון, לבסוף האימון עצמו (למקרה שאין CASCADE)
       const { data: weRows } = await supabase
         .from('workout_exercises')
         .select('id')
@@ -501,8 +566,6 @@ export default function StartWorkoutPage() {
       }
 
       await supabase.from('workouts').delete().eq('id', workoutId);
-
-      // איפוס UI במקום ניתוב — נמנע 404
       resetToPlanning();
     } catch (e: any) {
       setError(e?.message || 'שגיאה בביטול אימון.');
@@ -544,6 +607,12 @@ export default function StartWorkoutPage() {
 
   if (loading) return <p className="opacity-70">טוען…</p>;
 
+  // Use order_index instead of id to find active exercise (stable across startWorkout)
+  const activeMobileEx = exercises.find(e => e.order_index === mobileActiveIndex);
+  
+  // Calculate specific equipment type for mobile modal layout adjustments
+  const isCardio = activeMobileEx ? isCardioCheck(activeMobileEx.equip.name_en || activeMobileEx.equip.name_he || '') : false;
+
   return (
     <div className="mx-auto max-w-6xl space-y-8" dir="rtl">
       {/* Header */}
@@ -554,10 +623,12 @@ export default function StartWorkoutPage() {
         </p>
       </header>
 
-      {/* Choose tab (if not resuming) */}
+      {/* Choose tab (if not resuming) - UPDATED FOR MOBILE DROPDOWN */}
       {!workoutId && (
-        <div className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background p-4 md:p-6 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+        <div className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background p-4 md:p-6 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          
+          {/* Desktop/Tablet Horizontal Scroll */}
+          <div className="hidden md:flex items-center gap-2 overflow-x-auto pb-1">
             {tabs.length === 0 ? (
               <span className="text-sm opacity-70">אין טאבים. צרו טאב בעמוד "בחירת מכשירים".</span>
             ) : (
@@ -581,7 +652,33 @@ export default function StartWorkoutPage() {
               })
             )}
           </div>
-          <div className="text-sm">
+
+          {/* Mobile Dropdown */}
+          <div className="md:hidden w-full">
+            <label className="text-xs font-bold opacity-70 mb-1.5 block">בחר סוג אימון:</label>
+            {tabs.length === 0 ? (
+                 <span className="text-sm opacity-70">אין טאבים. צרו טאב בעמוד "בחירת מכשירים".</span>
+            ) : (
+                <div className="relative">
+                    <select
+                        value={chosenTabId || ''}
+                        onChange={(e) => setChosenTabId(Number(e.target.value))}
+                        className="w-full appearance-none bg-white dark:bg-neutral-800 border border-black/10 dark:border-white/20 rounded-xl py-3 pr-4 pl-10 text-base font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                        {tabs.map((t) => (
+                            <option key={t.id} value={t.id}>
+                                {t.emoji || '🏷️'} {t.name}
+                            </option>
+                        ))}
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center px-3 text-gray-500">
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </div>
+                </div>
+            )}
+          </div>
+
+          <div className="text-sm opacity-80 self-end md:self-auto">
             {exercises.length ? `נבחרו ${exercises.length} תרגילים בטאב זה` : 'לא נבחרו תרגילים לטאב זה'}
           </div>
         </div>
@@ -589,11 +686,27 @@ export default function StartWorkoutPage() {
 
       {/* Top status strip: timer + actions */}
       <div className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background p-4 md:p-6 flex flex-col md:flex-row items-center justify-between gap-3">
-        <div className="text-sm">
-          סטטוס:{' '}
-          {startedAt ? (endedAt ? <b>הושלם</b> : <b>באימון</b>) : <b>טרם התחלתם</b>}
+        <div className="text-sm flex flex-col md:flex-row items-center gap-1 md:gap-2">
+          <span>סטטוס:</span>
+          {startedAt ? (
+             endedAt ? (
+               <b className="text-emerald-600">הושלם</b>
+             ) : isAutoPaused ? (
+               <b className="text-orange-500 flex items-center gap-1">
+                 <span className="animate-pulse">⏸️</span> מושהה (חוסר פעילות)
+               </b>
+             ) : (
+               <b className="text-indigo-600">באימון</b>
+             )
+          ) : (
+             <b>טרם התחלתם</b>
+          )}
         </div>
-        <div className="text-2xl font-semibold tabular-nums">{startedAt ? elapsedFmt : '00:00'}</div>
+
+        <div className={`text-2xl font-semibold tabular-nums ${isAutoPaused ? 'opacity-50' : ''}`}>
+           {startedAt ? elapsedFmt : '00:00'}
+        </div>
+
         <div className="flex items-center gap-2">
           <button
             onClick={toggleRest}
@@ -617,7 +730,6 @@ export default function StartWorkoutPage() {
             </button>
           ) : endedAt ? (
             <>
-              {/* הוסר כפתור "לצפייה בהתקדמות" */}
               <button
                 onClick={resetToPlanning}
                 className="rounded-lg border border-black/10 dark:border-white/20 px-4 py-2 h-11 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
@@ -628,7 +740,7 @@ export default function StartWorkoutPage() {
             </>
           ) : (
             <button
-              onClick={finishWorkout}
+              onClick={() => finishWorkout()}
               className="rounded-lg px-4 py-2 h-11 bg-foreground text-background hover:opacity-90"
             >
               סיום אימון
@@ -643,8 +755,269 @@ export default function StartWorkoutPage() {
         </div>
       </div>
 
-      {/* ===== All exercises — 1 col on mobile, 2 cols on md+ ===== */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      {/* ===== MOBILE: Compact Grid of Images ===== */}
+      <div className="md:hidden grid grid-cols-2 gap-3">
+         {exercises.map(ex => (
+            <button 
+               key={ex.id || `mobile-ex-${ex.order_index}`}
+               // Use order_index instead of potentially 0-id for selection
+               onClick={() => {
+                   setMobileActiveIndex(ex.order_index);
+                   registerActivity(); // Tracking interaction
+               }}
+               className={`relative aspect-[4/3] rounded-xl overflow-hidden border transition-all ${finishedWe[ex.id] ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-black/10 dark:border-white/10'}`}
+            >
+               {/* eslint-disable-next-line @next/next/no-img-element */}
+               <img src={ex.equip.image_url || PLACEHOLDER_IMG} className="absolute inset-0 w-full h-full object-cover" alt="" />
+               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-3 text-right">
+                  <span className="text-white font-bold text-sm leading-tight line-clamp-2">
+                    {ex.equip.name_he || ex.equip.name_en || 'תרגיל'}
+                  </span>
+                  <div className="flex justify-between items-end mt-1">
+                     <span className="text-[10px] text-white/80">
+                        {ex.sets.length > 0 ? `${ex.sets.length} סטים` : 'טרם בוצע'}
+                     </span>
+                     {finishedWe[ex.id] && <span className="text-emerald-400 text-xs">✓</span>}
+                  </div>
+               </div>
+            </button>
+         ))}
+      </div>
+
+      {/* ===== MOBILE MODAL for Active Exercise ===== */}
+      {/* Check explicitly against null because index 0 is falsy */}
+      {mobileActiveIndex !== null && activeMobileEx && (
+         <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm md:hidden animate-in fade-in duration-200">
+            {/* Modal Content - ADDED MARGIN AND CORNERS */}
+            <div 
+                className="bg-white dark:bg-neutral-900 w-[calc(100%-16px)] h-[85vh] mx-auto mb-2 rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-300"
+                onClick={e => e.stopPropagation()}
+            >
+               {/* Modal Header */}
+               <div className="p-4 border-b border-black/10 dark:border-white/10 flex justify-between items-center bg-gray-50 dark:bg-white/5 shrink-0">
+                  <div className="flex flex-col">
+                      <h3 className="font-bold text-lg leading-tight">
+                         {activeMobileEx.equip.name_he || activeMobileEx.equip.name_en}
+                      </h3>
+                      <span className="text-xs opacity-60">
+                        {activeMobileEx.sets.length} סטים בוצעו
+                      </span>
+                  </div>
+                  <button 
+                     onClick={() => setMobileActiveIndex(null)} 
+                     className="bg-gray-200 dark:bg-white/10 text-gray-700 dark:text-white px-4 py-2 rounded-lg text-sm font-medium"
+                  >
+                     סגור
+                  </button>
+               </div>
+
+               {/* Modal Body - Scrollable */}
+               <div className="p-4 overflow-y-auto flex-1 space-y-6 bg-background">
+                  
+                  {/* Image & History Toggle - CHANGED */}
+                  <div className="flex flex-col gap-4 items-center">
+                     {/* Image Container - CENTERED AND LARGER */}
+                     <div className="w-full h-48 sm:h-56 rounded-xl overflow-hidden border border-black/10 dark:border-white/10 bg-white shadow-sm relative group">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img 
+                            src={activeMobileEx.equip.image_url || PLACEHOLDER_IMG} 
+                            className="w-full h-full object-contain p-2" 
+                            alt="equipment" 
+                        />
+                     </div>
+
+                     {/* History Section - BUTTON WIDTH ADJUSTED */}
+                     <div className="w-full">
+                        <button
+                           onClick={async () => {
+                             registerActivity();
+                             const equipId = activeMobileEx.equipment_id;
+                             const open = !expanded[equipId];
+                             setExpanded((m) => ({ ...m, [equipId]: open }));
+                             if (open && historyByEquip[equipId] == null) {
+                               await loadHistory(equipId);
+                             }
+                           }}
+                           className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 text-sm font-bold transition-colors hover:bg-indigo-100 dark:hover:bg-indigo-900/30"
+                        >
+                           <span>{expanded[activeMobileEx.equipment_id] ? 'הסתר היסטוריה' : 'הצג היסטוריה אחרונה'}</span>
+                           <span>🕒</span>
+                        </button>
+
+                        {/* History container - REMOVED SCROLL, ADDED CONDITIONAL COLUMNS */}
+                        {expanded[activeMobileEx.equipment_id] && (
+                           <div className="mt-3 bg-white dark:bg-black/20 border border-black/5 dark:border-white/5 rounded-xl overflow-hidden shadow-sm animate-in fade-in slide-in-from-top-2 duration-200">
+                              <div className="p-0">
+                                  {historyBusy[activeMobileEx.equipment_id] ? (
+                                    <div className="p-4 text-center text-sm opacity-60">טוען נתונים...</div>
+                                  ) : (historyByEquip[activeMobileEx.equipment_id]?.length ?? 0) === 0 ? (
+                                    <div className="p-4 text-center text-sm opacity-60">אין היסטוריה לתרגיל זה</div>
+                                  ) : (
+                                    // Removed max-h and overflow-y to show full list
+                                    <AggregatedHistoryByWeight 
+                                        rows={historyByEquip[activeMobileEx.equipment_id]!} 
+                                        fmtDate={fmtDate}
+                                        isCardio={isCardio}
+                                    />
+                                  )}
+                              </div>
+                           </div>
+                        )}
+                     </div>
+                  </div>
+
+                  {/* Input Form */}
+                  <div className="bg-white dark:bg-neutral-800 p-5 rounded-xl border border-black/5 dark:border-white/5 shadow-sm ring-1 ring-black/5">
+                     <div className="flex items-center justify-between mb-4">
+                        <h4 className="font-bold text-base flex items-center gap-2">
+                            <span className="w-1 h-5 bg-indigo-500 rounded-full"></span>
+                            הוספת סט {activeMobileEx.sets.length + 1}
+                        </h4>
+                        <div className="text-xs text-gray-500 font-mono">
+                            {newSetByEx[activeMobileEx.id]?.weight ? `${newSetByEx[activeMobileEx.id]?.weight}kg` : ''}
+                        </div>
+                     </div>
+                     
+                     <form
+                        onSubmit={async (e) => {
+                           e.preventDefault();
+                           await addSet(activeMobileEx.id);
+                        }}
+                        className="space-y-4"
+                     >
+                        <div className="grid grid-cols-2 gap-4">
+                            {!isCardio && (
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-medium opacity-70">משקל (ק״ג)</label>
+                                    <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        value={newSetByEx[activeMobileEx.id]?.weight ?? ''}
+                                        onChange={(e) => {
+                                            registerActivity();
+                                            setNewSetByEx(m => ({ ...m, [activeMobileEx.id]: { ...(m[activeMobileEx.id] ?? {weight:'',reps:'',distance:''}), weight: e.target.value } }))
+                                        }}
+                                        ref={el => { if(!weightRefMap.current[activeMobileEx.id]) weightRefMap.current[activeMobileEx.id] = el; }}
+                                        placeholder="0"
+                                        className="w-full bg-gray-50 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-lg px-3 py-3 text-lg font-bold text-center focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    />
+                                </div>
+                            )}
+                            
+                            <div className={`space-y-1.5 ${isCardio ? 'col-span-1' : ''}`}>
+                                <label className="text-xs font-medium opacity-70">חזרות</label>
+                                <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    value={newSetByEx[activeMobileEx.id]?.reps ?? ''}
+                                    onChange={(e) => {
+                                        registerActivity();
+                                        setNewSetByEx(m => ({ ...m, [activeMobileEx.id]: { ...(m[activeMobileEx.id] ?? {weight:'',reps:'',distance:''}), reps: e.target.value } }))
+                                    }}
+                                    placeholder="0"
+                                    className="w-full bg-gray-50 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-lg px-3 py-3 text-lg font-bold text-center focus:ring-2 focus:ring-indigo-500 outline-none"
+                                />
+                            </div>
+
+                            {isCardio && (
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-medium opacity-70">מרחק (מ׳)</label>
+                                    <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        value={newSetByEx[activeMobileEx.id]?.distance ?? ''}
+                                        onChange={(e) => {
+                                            registerActivity();
+                                            setNewSetByEx(m => ({ ...m, [activeMobileEx.id]: { ...(m[activeMobileEx.id] ?? {weight:'',reps:'',distance:''}), distance: e.target.value } }))
+                                        }}
+                                        placeholder="0"
+                                        className="w-full bg-gray-50 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-lg px-3 py-3 text-lg font-bold text-center focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    />
+                                </div>
+                            )}
+                        </div>
+
+                        <button 
+                           disabled={!!endedAt || !startedAt}
+                           className="w-full py-3.5 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2"
+                        >
+                           <span>{activeMobileEx.sets.length === 0 ? 'התחל תרגיל' : 'הוסף סט'}</span>
+                           <span className="text-xl leading-none">+</span>
+                        </button>
+                        
+                        {!startedAt && (
+                           <p className="text-xs text-center text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 py-2 rounded-lg">
+                              ⚠️ האימון יתחיל אוטומטית עם הוספת הסט
+                           </p>
+                        )}
+                     </form>
+                  </div>
+
+                  {/* Sets List */}
+                  {activeMobileEx.sets.length > 0 && (
+                     <div className="space-y-3">
+                        <div className="flex items-center justify-between px-1">
+                            <h4 className="font-bold text-sm opacity-80">סטים שבוצעו ({activeMobileEx.sets.length})</h4>
+                            <span className="text-xs opacity-50">האחרון למעלה</span>
+                        </div>
+                        <div className="space-y-2">
+                           {[...activeMobileEx.sets].reverse().map((s, idx) => (
+                              <div key={s.id} className="flex justify-between items-center p-3.5 bg-white dark:bg-neutral-800 rounded-xl border border-black/5 dark:border-white/5 shadow-sm">
+                                 <div className="flex items-center gap-4">
+                                    <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-sm font-bold font-mono">
+                                       {s.set_index}
+                                    </div>
+                                    
+                                    {!isCardio && (
+                                        <div className="flex flex-col">
+                                            <div className="flex items-baseline gap-1">
+                                                <span className="text-xl font-bold tabular-nums">{fmtNum(s.weight_kg)}</span>
+                                                <span className="text-xs opacity-60 font-medium">ק"ג</span>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {!isCardio && <div className="w-px h-8 bg-black/5 dark:bg-white/10 mx-1"></div>}
+                                    
+                                    <div className="flex flex-col">
+                                       <div className="flex items-baseline gap-1">
+                                            <span className="text-xl font-bold tabular-nums">{fmtNum(s.reps)}</span>
+                                            <span className="text-xs opacity-60 font-medium">חזרות</span>
+                                       </div>
+                                    </div>
+
+                                    {isCardio && s.distance_m != null && (
+                                        <>
+                                            <div className="w-px h-8 bg-black/5 dark:bg-white/10 mx-1"></div>
+                                            <div className="flex flex-col">
+                                                <div className="flex items-baseline gap-1">
+                                                    <span className="text-xl font-bold tabular-nums">{fmtNum(s.distance_m)}</span>
+                                                    <span className="text-xs opacity-60 font-medium">מ'</span>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+                                 </div>
+                                 <button 
+                                    onClick={() => removeSet(activeMobileEx.id, s.id)}
+                                    className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-colors"
+                                    aria-label="מחק סט"
+                                 >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                 </button>
+                              </div>
+                           ))}
+                        </div>
+                     </div>
+                  )}
+
+               </div>
+            </div>
+         </div>
+      )}
+
+      {/* ===== DESKTOP: Existing List View (Hidden on mobile) ===== */}
+      <div className="hidden md:grid md:grid-cols-2 gap-5">
         {exercises.map((ex) => {
           const weId = ex.id;
           const equipId = ex.equipment_id;
@@ -689,6 +1062,7 @@ export default function StartWorkoutPage() {
                 <div className="flex items-center justify-end">
                   <button
                     onClick={async () => {
+                      registerActivity();
                       const open = !expanded[equipId];
                       setExpanded((m) => ({ ...m, [equipId]: open }));
                       if (open && historyByEquip[equipId] == null) {
@@ -727,36 +1101,39 @@ export default function StartWorkoutPage() {
                     inputRef={(el) => (weightRefMap.current[weId] = el)}
                     label="משקל (ק״ג)"
                     value={form.weight}
-                    onChange={(v) =>
+                    onChange={(v) => {
+                      registerActivity();
                       setNewSetByEx((m) => ({
                         ...m,
                         [weId]: { ...(m[weId] ?? { weight: '', reps: '', distance: '' }), weight: v },
                       }))
-                    }
+                    }}
                     placeholder="לדוגמה: 40"
                   />
                   <NumberField
                     className="md:col-span-2"
                     label="חזרות"
                     value={form.reps}
-                    onChange={(v) =>
+                    onChange={(v) => {
+                      registerActivity();
                       setNewSetByEx((m) => ({
                         ...m,
                         [weId]: { ...(m[weId] ?? { weight: '', reps: '', distance: '' }), reps: v },
                       }))
-                    }
+                    }}
                     placeholder="לדוגמה: 10"
                   />
                   <NumberField
                     className="md:col-span-2"
                     label="מרחק (מ׳)"
                     value={form.distance}
-                    onChange={(v) =>
+                    onChange={(v) => {
+                      registerActivity();
                       setNewSetByEx((m) => ({
                         ...m,
                         [weId]: { ...(m[weId] ?? { weight: '', reps: '', distance: '' }), distance: v },
                       }))
-                    }
+                    }}
                     placeholder="לדוגמה: 1000"
                   />
                   <div className="md:col-span-6">
@@ -826,9 +1203,11 @@ export default function StartWorkoutPage() {
 function AggregatedHistoryByWeight({
   rows,
   fmtDate,
+  isCardio = false,
 }: {
   rows: HistoryRow[];
   fmtDate: Intl.DateTimeFormat;
+  isCardio?: boolean;
 }) {
   // Group by (workout_id, weight_kg)
   type Key = string; // `${workout_id}__${weight_kg ?? 'null'}`
@@ -865,25 +1244,25 @@ function AggregatedHistoryByWeight({
   });
 
   return (
-    <div className="w-full overflow-x-auto max-h-56 overflow-y-auto">
+    <div className="w-full">
       <table className="w-full text-xs md:text-sm">
         <thead className="bg-black/5 dark:bg-white/10">
           <tr className="text-right">
             <Th>תאריך</Th>
-            <Th>משקל (ק״ג)</Th>
+            {!isCardio && <Th>משקל (ק״ג)</Th>}
             <Th>סטים</Th>
             <Th>חזרות (סה״כ)</Th>
-            <Th>מרחק (מ׳)</Th>
+            {isCardio && <Th>מרחק (מ׳)</Th>}
           </tr>
         </thead>
         <tbody className="divide-y divide-black/10 dark:divide-white/10">
           {items.map((it, i) => (
             <tr key={i}>
               <Td className="whitespace-nowrap">{fmtDate.format(new Date(it.started_at))}</Td>
-              <Td>{it.weight_kg == null ? '—' : it.weight_kg}</Td>
+              {!isCardio && <Td>{it.weight_kg == null ? '—' : it.weight_kg}</Td>}
               <Td>{it.sets}</Td>
               <Td>{it.reps || 0}</Td>
-              <Td>{it.distance || 0}</Td>
+              {isCardio && <Td>{it.distance || 0}</Td>}
             </tr>
           ))}
         </tbody>
@@ -938,8 +1317,6 @@ function NumberField({
   );
 }
 // ===== End Section 4 =====
-
-
 
 // ===== Section 5 — Utils =====
 function toNumOrNull(v: string): number | null {
