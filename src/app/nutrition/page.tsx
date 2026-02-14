@@ -138,6 +138,20 @@ export default function NutritionPage() {
   const fmtDate = useMemo(() => new Intl.DateTimeFormat('he-IL', { dateStyle: 'full' }), []);
   const fmtTime = useMemo(() => new Intl.DateTimeFormat('he-IL', { timeStyle: 'short' }), []);
 
+  // Helper for nice date display (client-side only to ensure correct locale)
+  const [displayDate, setDisplayDate] = useState('');
+  useEffect(() => {
+    if (!aiOccurredLocal) {
+        setDisplayDate('');
+        return;
+    }
+    const d = new Date(aiOccurredLocal);
+    // Explicitly using he-IL
+    setDisplayDate(new Intl.DateTimeFormat('he-IL', { 
+       day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit'
+    }).format(d));
+  }, [aiOccurredLocal]);
+
   /* -------- Bootstrap -------- */
   useEffect(() => {
     let ignore = false;
@@ -609,54 +623,75 @@ export default function NutritionPage() {
             />
 
             {/* 2. Actions Row: Date, Camera, Gallery */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
-               <DateTimeField
-                label="מתי?"
-                value={aiOccurredLocal}
-                onChange={setAiOccurredLocal}
-                className="w-full"
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+               
+               {/* Date Picker Button (Masking real input for better UI on iPhone) */}
+               <div className="relative w-full min-w-0">
+                  <span className="text-sm font-medium opacity-80 mb-1 block">מתי?</span>
+                  <div className="relative w-full h-12 rounded-lg border border-black/10 dark:border-white/20 bg-white dark:bg-white/5 flex items-center justify-between shadow-sm transition-colors overflow-hidden group">
+                      {/* Visuals - Using absolute positioning for text to avoid layout shift */}
+                      <div className="absolute inset-0 flex items-center justify-between px-3 pointer-events-none z-10">
+                          <span className="text-sm font-mono ltr:tracking-wide truncate text-gray-700 dark:text-gray-200">
+                              {displayDate}
+                          </span>
+                          <span className="text-indigo-500 opacity-80">📅</span>
+                      </div>
+                      
+                      {/* The invisible native input trigger - z-20 to be on top */}
+                      <input
+                        type="datetime-local"
+                        value={aiOccurredLocal}
+                        onChange={(e) => setAiOccurredLocal(e.target.value)}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20 appearance-none"
+                        style={{ direction: 'ltr' }}
+                      />
+                  </div>
+               </div>
 
-              {/* Camera Button (Mobile) */}
-              <label className="md:hidden flex items-center justify-center gap-2 rounded-lg border border-black/10 dark:border-white/20 py-2.5 text-sm font-medium cursor-pointer hover:bg-black/[.04] dark:hover:bg-white/[.06] bg-white dark:bg-white/5 h-[42px]">
-                <CameraIcon className="w-5 h-5 text-indigo-500" />
-                <span>צלם</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)}
-                />
-              </label>
+               {/* Buttons Row - Fixed Layout */}
+               <div className="flex gap-2 w-full h-12">
+                   {/* Mobile Camera */}
+                   <label className="md:hidden flex-1 flex items-center justify-center gap-2 rounded-lg border border-black/10 dark:border-white/20 text-sm font-medium cursor-pointer bg-white dark:bg-white/5 shadow-sm hover:bg-gray-50 dark:hover:bg-white/10 h-full transition-colors relative overflow-hidden">
+                    <CameraIcon className="w-5 h-5 text-indigo-500" />
+                    <span>צלם</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)}
+                    />
+                  </label>
 
-               {/* Upload Button (Desktop & Mobile) */}
-              <label className="flex items-center justify-center gap-2 rounded-lg border border-black/10 dark:border-white/20 py-2.5 text-sm font-medium cursor-pointer hover:bg-black/[.04] dark:hover:bg-white/[.06] bg-white dark:bg-white/5 h-[42px]">
-                <UploadIcon className="w-5 h-5 text-indigo-500" />
-                <span>{photoFile ? 'החלף תמונה' : 'גלריה/קובץ'}</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)}
-                />
-              </label>
+                   {/* Upload */}
+                  <label className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-black/10 dark:border-white/20 text-sm font-medium cursor-pointer bg-white dark:bg-white/5 shadow-sm hover:bg-gray-50 dark:hover:bg-white/10 h-full transition-colors relative overflow-hidden">
+                    <UploadIcon className="w-5 h-5 text-indigo-500" />
+                    <span className="hidden sm:inline">{photoFile ? 'החלף' : 'גלריה/קובץ'}</span>
+                    <span className="sm:hidden">{photoFile ? 'החלף' : 'גלריה'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)}
+                    />
+                  </label>
 
-               {/* Clear Photo (Conditional) */}
-               {photoFile && (
-                 <button
-                   type="button"
-                   onClick={clearPhoto}
-                   className="flex items-center justify-center rounded-lg border border-red-200 dark:border-red-900/30 text-red-600 bg-red-50 dark:bg-red-900/10 py-2.5 text-sm font-medium h-[42px]"
-                 >
-                   הסר תמונה
-                 </button>
-               )}
+                   {/* Clear Photo */}
+                   {photoFile && (
+                     <button
+                       type="button"
+                       onClick={clearPhoto}
+                       className="w-12 flex items-center justify-center rounded-lg border border-red-200 dark:border-red-900/30 text-red-600 bg-red-50 dark:bg-red-900/10 h-full hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors"
+                     >
+                       ✕
+                     </button>
+                   )}
+               </div>
             </div>
 
             {/* Preview (if any) */}
             {photoPreviewUrl && (
-              <div className="relative rounded-lg overflow-hidden h-40 w-full bg-black/5 dark:bg-white/5 flex items-center justify-center border border-black/10 dark:border-white/10">
+              <div className="relative rounded-lg overflow-hidden h-40 w-full bg-black/5 dark:bg-white/5 flex items-center justify-center border border-black/10 dark:border-white/10 mt-2">
                 <img
                   src={photoPreviewUrl}
                   alt="תצוגה מקדימה"
@@ -672,7 +707,7 @@ export default function NutritionPage() {
             <button
               onClick={runAi}
               disabled={aiLoading || (!aiText.trim() && !photoFile)}
-              className="w-full rounded-xl py-3 bg-indigo-600 text-white font-bold shadow-md hover:bg-indigo-700 active:scale-[0.98] transition-all disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
+              className="w-full rounded-xl py-3.5 bg-indigo-600 text-white font-bold shadow-md hover:bg-indigo-700 active:scale-[0.98] transition-all disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2 text-base mt-2"
             >
               {aiLoading ? (
                 <>
@@ -694,15 +729,15 @@ export default function NutritionPage() {
 
             {/* Results Table */}
             {aiItems && aiItems.length > 0 && (
-              <div className="space-y-3 animate-in fade-in slide-in-from-top-4">
+              <div className="space-y-3 animate-in fade-in slide-in-from-top-4 mt-4">
                 <div className="flex justify-between items-center bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-lg border border-indigo-100 dark:border-indigo-900/30">
                    <div className="text-sm font-medium text-indigo-900 dark:text-indigo-100">
                      סה״כ: {fmtNum(aiTotals.calories)} קק״ל
                    </div>
                    <div className="text-xs text-indigo-700 dark:text-indigo-300 space-x-2 rtl:space-x-reverse">
-                      <span>🥩 {fmtNum(aiTotals.protein_g)}</span>
-                      <span>🍞 {fmtNum(aiTotals.carbs_g)}</span>
-                      <span>🥑 {fmtNum(aiTotals.fat_g)}</span>
+                      <span>🥩 {fmtNum(aiTotals.protein_g)} גר'</span>
+                      <span>🍞 {fmtNum(aiTotals.carbs_g)} גר'</span>
+                      <span>🥑 {fmtNum(aiTotals.fat_g)} גר'</span>
                    </div>
                 </div>
 
@@ -796,7 +831,7 @@ export default function NutritionPage() {
                            </div>
                            {/* Day Total Badge */}
                            <span className="text-xs bg-black/5 dark:bg-white/10 px-2 py-0.5 rounded-full font-mono">
-                              {fmtNum(g.totals.calories)} kcal
+                              {fmtNum(g.totals.calories)} קק"ל
                            </span>
                         </div>
                         <ChevronDownIcon className={`w-5 h-5 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''} opacity-50`} />
@@ -804,9 +839,9 @@ export default function NutritionPage() {
                       
                       {!isOpen && (
                          <div className="text-xs opacity-60 flex gap-3 mt-1">
-                            <span>🥩 {fmtNum(g.totals.protein_g)}g</span>
-                            <span>🍞 {fmtNum(g.totals.carbs_g)}g</span>
-                            <span>🥑 {fmtNum(g.totals.fat_g)}g</span>
+                            <span>🥩 {fmtNum(g.totals.protein_g)} גר'</span>
+                            <span>🍞 {fmtNum(g.totals.carbs_g)} גר'</span>
+                            <span>🥑 {fmtNum(g.totals.fat_g)} גר'</span>
                          </div>
                       )}
                     </button>
@@ -823,7 +858,7 @@ export default function NutritionPage() {
                                    {e.notes && <div className="text-xs opacity-50 italic">"{e.notes}"</div>}
                                 </div>
                                 <div className="text-right space-y-1">
-                                   <div className="font-mono text-sm font-bold">{Math.round(e.calories || 0)}</div>
+                                   <div className="font-mono text-sm font-bold">{Math.round(e.calories || 0)} קק"ל</div>
                                    <button 
                                       onClick={() => deleteEntry(e.id)}
                                       className="text-xs text-red-500 hover:text-red-600 px-2 py-1 rounded bg-red-50 dark:bg-red-900/10"
@@ -952,6 +987,12 @@ export default function NutritionPage() {
     });
   }
 }
+
+/* =========================
+   END SECTION 3
+   ========================= */
+
+
 
 /* =========================
    SECTION 4 — Icons

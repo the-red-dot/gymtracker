@@ -33,7 +33,13 @@ type GeminiContent = { role?: string; parts?: GeminiPart[] };
 type GeminiCandidate = { content?: GeminiContent };
 type GeminiResponse = { candidates?: GeminiCandidate[]; [k: string]: unknown };
 
-const MODEL = 'gemini-2.5-flash-lite';
+// הגדרת סדר המודלים לפי בקשת המשתמש
+const MODELS_PRIORITY = [
+  'gemini-3-flash-preview',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash'
+];
+
 const ALLOWED_IMAGE_MIME = new Set([
   'image/jpeg',
   'image/png',
@@ -94,10 +100,6 @@ export async function POST(req: Request) {
       if (!text) return j({ error: 'missing "text"' }, 400);
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${encodeURIComponent(
-      apiKey
-    )}`;
-
     // === System instruction: Hebrew-only labels + granular decomposition ===
     const system = [
       'Return ONLY valid JSON with this shape:',
@@ -128,6 +130,13 @@ export async function POST(req: Request) {
       '- Choose reasonable grams per component so that their sum approximates the visible/mentioned portion.',
       '- No free text outside of the single JSON.',
       '',
+      'PORTION SIZING LOGIC (CRITICAL):',
+      '- If the user mentions a specific quantity (e.g., "500g meat"), respect it.',
+      '- If the user DOES NOT specify a quantity (e.g., "Blintzes with meat", "Schnitzel", "Slice of cake"), YOU MUST ASSUME A STANDARD SINGLE SERVING.',
+      '- DO NOT assume raw package sizes (e.g. 500g/1kg meat) for a single meal description.',
+      '- Example: "Blintzes filled with meat" -> usually 2 units, approx 150-200g total weight. NOT 500g.',
+      '- Example: "Schnitzel" -> usually 1 unit, approx 150g.',
+      '',
       'Formatting:',
       '- Return concise Hebrew item names. Round numbers to up to 2 decimals.',
       '- If any ambiguity exists (e.g., סוג הדג לא ברור), write a short Hebrew note in "notes".',
@@ -144,37 +153,76 @@ export async function POST(req: Request) {
     if (imagePart) userParts.push({ inline_data: imagePart });
     if (text && text.trim()) userParts.push({ text: text.trim() });
 
-    const body = {
-      systemInstruction: { role: 'system', parts: [{ text: system }] },
-      contents: [{ role: 'user', parts: userParts }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        temperature: 0.2,
-        topK: 40,
-        topP: 0.95,
-      },
-    };
+    // --- Retry Logic with Model Fallback ---
+    let lastError: any = null;
+    let successfulModel = '';
+    let raw: unknown = null;
+    let r: Response | null = null;
 
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    for (const model of MODELS_PRIORITY) {
+      try {
+        console.log(`Trying model: ${model}...`);
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        
+        const body = {
+          systemInstruction: { role: 'system', parts: [{ text: system }] },
+          contents: [{ role: 'user', parts: userParts }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.2,
+            topK: 40,
+            topP: 0.95,
+          },
+        };
 
-    const raw: unknown = await r.json().catch<unknown>(() => ({}));
-    if (!r.ok) {
-      return j(
-        { error: 'Gemini API error', detail: isRecord(raw) && (raw as any).error ? (raw as any).error : raw },
-        r.status === 429 ? 429 : 502
-      );
+        r = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        if (!r.ok) {
+            // אם יש שגיאה, זורקים שגיאה כדי לתפוס ב-catch ולהמשיך למודל הבא
+            const errBody = await r.json().catch(() => ({}));
+            throw new Error(`Model ${model} failed with status ${r.status}: ${JSON.stringify(errBody)}`);
+        }
+
+        raw = await r.json().catch<unknown>(() => ({}));
+        
+        // ולידציה בסיסית שיש תוכן
+        if (!isRecord(raw) || !raw.candidates || !Array.isArray(raw.candidates) || raw.candidates.length === 0) {
+            throw new Error(`Model ${model} returned empty/invalid structure.`);
+        }
+
+        // הצלחה
+        successfulModel = model;
+        break; 
+
+      } catch (err) {
+        console.warn(`Attempt with ${model} failed:`, err);
+        lastError = err;
+        // ממשיכים למודל הבא בלולאה
+      }
+    }
+
+    // אם אחרי כל הניסיונות עדיין אין תשובה תקינה
+    if (!successfulModel || !raw) {
+       return j({ 
+         error: 'All AI models failed', 
+         detail: lastError instanceof Error ? lastError.message : String(lastError) 
+       }, 502);
     }
 
     const textOut = extractGeminiText(raw);
     const parsedUnknown = safeParseJson(textOut);
-    if (!parsedUnknown) return j({ error: 'model returned empty' }, 502);
+    
+    if (!parsedUnknown) {
+        // מקרה קצה: המודל החזיר תשובה טכנית תקינה אבל התוכן לא JSON
+        return j({ error: 'model returned empty or invalid JSON', raw: textOut, model: successfulModel }, 502);
+    }
 
     if (!isRecord(parsedUnknown)) {
-      return j({ error: 'model returned unexpected format', raw: textOut, full: raw }, 502);
+      return j({ error: 'model returned unexpected format', raw: textOut, full: raw, model: successfulModel }, 502);
     }
 
     // tolerate "meals" → "items"
@@ -183,7 +231,7 @@ export async function POST(req: Request) {
       (Array.isArray((parsedUnknown as any).meals) ? (parsedUnknown as any).meals : undefined);
 
     if (!Array.isArray(rawItems)) {
-      return j({ error: 'model returned unexpected format (no items array)', raw: textOut, full: raw }, 502);
+      return j({ error: 'model returned unexpected format (no items array)', raw: textOut, full: raw, model: successfulModel }, 502);
     }
 
     // === Normalize items: ensure grams & per100; compute totals ===
@@ -197,7 +245,12 @@ export async function POST(req: Request) {
     };
 
     const out: AiResponse = { items, totals };
-    return j(out, 200);
+    
+    // החזרת ה-Response עם כותרת שמציינת באיזה מודל השתמשנו (לצורכי דיבוג/UI)
+    const finalRes = j(out, 200);
+    finalRes.headers.set('x-model-used', successfulModel);
+    return finalRes;
+
   } catch (e) {
     const msg = (e as { message?: string })?.message || 'unknown error';
     return j({ error: msg }, 500);

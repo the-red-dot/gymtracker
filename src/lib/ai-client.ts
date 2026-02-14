@@ -3,30 +3,35 @@
 
 // הגדרת המודלים (עודכן לפי בקשה לגרסאות החדשות)
 const PRIMARY_MODEL = 'gemini-3-flash-preview';
+const SECONDARY_MODEL = 'gemini-2.5-pro';
 const FALLBACK_MODEL = 'gemini-2.5-flash';
 
 export async function callGeminiWithFallback(apiKey: string, prompt: string, jsonMode: boolean) {
-  // שימוש במודל הראשי שהוגדר למעלה
-  const targetPrimary = PRIMARY_MODEL;
-
+  
+  // ניסיון 1: Primary
   try {
-    console.log(`AI Request: Trying Primary Model (${targetPrimary})...`);
-    return await callGemini(apiKey, prompt, jsonMode, targetPrimary);
+    console.log(`AI Request: Trying Primary Model (${PRIMARY_MODEL})...`);
+    return await callGemini(apiKey, prompt, jsonMode, PRIMARY_MODEL);
   } catch (error) {
-    console.warn(`Primary model failed, switching to Fallback (${FALLBACK_MODEL}). Error:`, error);
-    
-    // ניסיון שני עם מודל הגיבוי
-    const response = await callGemini(apiKey, prompt, jsonMode, FALLBACK_MODEL);
-    
-    // סימון שהשתמשנו בגיבוי (כדי להציג למשתמש ב-UI)
-    const newHeaders = new Headers(response.headers);
-    newHeaders.set('x-model-used', FALLBACK_MODEL);
-    
-    return new Response(response.body, {
-      status: response.status,
-      headers: newHeaders
-    });
+    console.warn(`Primary model failed, switching to Secondary (${SECONDARY_MODEL}). Error:`, error);
   }
+
+  // ניסיון 2: Secondary
+  try {
+    console.log(`AI Request: Trying Secondary Model (${SECONDARY_MODEL})...`);
+    const response = await callGemini(apiKey, prompt, jsonMode, SECONDARY_MODEL);
+    const newHeaders = new Headers(response.headers);
+    newHeaders.set('x-model-used', SECONDARY_MODEL);
+    return new Response(response.body, { status: response.status, headers: newHeaders });
+  } catch (error) {
+    console.warn(`Secondary model failed, switching to Fallback (${FALLBACK_MODEL}). Error:`, error);
+  }
+
+  // ניסיון 3: Fallback (אחרון)
+  const response = await callGemini(apiKey, prompt, jsonMode, FALLBACK_MODEL);
+  const newHeaders = new Headers(response.headers);
+  newHeaders.set('x-model-used', FALLBACK_MODEL);
+  return new Response(response.body, { status: response.status, headers: newHeaders });
 }
 
 async function callGemini(apiKey: string, prompt: string, jsonMode: boolean, model: string) {

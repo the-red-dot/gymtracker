@@ -117,7 +117,7 @@ export default function EquipmentPage() {
   // Tabs
   const [tabs, setTabs] = useState<WorkoutTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<number | null>(null);
-   
+    
   // DB equipment + selections (for ALL equipment list)
   const [equipViews, setEquipViews] = useState<EquipView[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set()); // selection for CURRENT TAB
@@ -243,16 +243,16 @@ export default function EquipmentPage() {
 
       setTabs(curTabs);
       
-      // Load all selections for ALL tabs (to support refresh logic later)
-      await loadAllTabsSelections(uid, curTabs);
+      // Load all selections for ALL tabs and GET THE MAP BACK
+      const selectionsMap = await loadAllTabsSelections(uid, curTabs);
 
       if (activeTabId === null || !curTabs.find(t => t.id === activeTabId)) {
         const firstId = curTabs[0].id;
         setActiveTabId(firstId);
-        // Set local selection state for UI based on the pre-loaded map
-        updateLocalSelectionFromMap(firstId);
+        // Pass the fresh map explicitly because state update is async
+        updateLocalSelectionFromMap(firstId, selectionsMap);
       } else {
-        updateLocalSelectionFromMap(activeTabId);
+        updateLocalSelectionFromMap(activeTabId, selectionsMap);
       }
       
     } catch (e: any) {
@@ -269,7 +269,7 @@ export default function EquipmentPage() {
 
     if (error) {
       console.error('Error loading selections:', error);
-      return;
+      return {};
     }
 
     const map: Record<number, Set<number>> = {};
@@ -283,10 +283,13 @@ export default function EquipmentPage() {
     });
 
     setAllTabsSelections(map);
+    return map; // Return the map so we can use it immediately
   }
 
-  function updateLocalSelectionFromMap(tabId: number) {
-    const ids = allTabsSelections[tabId] || new Set();
+  function updateLocalSelectionFromMap(tabId: number, overrideMap?: Record<number, Set<number>>) {
+    // Use the override map if provided (for immediate updates), otherwise use state
+    const sourceMap = overrideMap || allTabsSelections;
+    const ids = sourceMap[tabId] || new Set();
     setSelected(new Set(ids));
     setSelectedInitial(new Set(ids));
   }
@@ -294,8 +297,8 @@ export default function EquipmentPage() {
   async function loadTabSelection(uid: string, tabId: number) {
     // Legacy single load wrapper - logic moved to loadAllTabsSelections for efficiency
     // But we still need to refresh the map if called individually
-    await loadAllTabsSelections(uid, tabs);
-    updateLocalSelectionFromMap(tabId);
+    const map = await loadAllTabsSelections(uid, tabs);
+    updateLocalSelectionFromMap(tabId, map);
   }
 
   async function loadEquipmentAndJson(_uid: string) {
@@ -725,15 +728,15 @@ export default function EquipmentPage() {
                   
                   {/* Refresh Button - Based on ACTUAL tabs/exercises */}
                   <div className="flex justify-end">
-                     <button
+                      <button
                         onClick={handleRefreshPlan}
                         disabled={aiLoading}
                         className="text-xs flex items-center gap-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-300 px-3 py-1.5 rounded-full hover:bg-blue-100 dark:hover:bg-blue-900/40 transition"
                         title="ינתח מחדש את הטאבים והתרגילים שבחרת וייצור הסבר מעודכן"
-                     >
+                      >
                         <svg className={`w-3.5 h-3.5 ${aiLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                         {aiLoading ? 'מעדכן...' : 'רענן ניתוח עפ"י השינויים שלי'}
-                     </button>
+                      </button>
                   </div>
 
                   {/* Summary rendered as HTML */}
@@ -1460,3 +1463,5 @@ function ChevronDownIcon(props: { className?: string }) {
   );
 }
 // ===== End Section 6 =====
+
+// we will need to split this script into components and hooks, but for the sake of this exercise, I kept everything in one file for easier reading and context understanding.
