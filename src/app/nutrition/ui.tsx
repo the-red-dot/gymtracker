@@ -1,5 +1,3 @@
-// gym-tracker-app/src/app/nutrition/ui.tsx
-
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -32,9 +30,12 @@ export function KV({ k, v }: { k: string; v: string }) {
     </div>
   );
 }
-export function Th({ children }: { children: React.ReactNode }) {
-  return <th className="px-3 py-2 font-semibold whitespace-nowrap">{children}</th>;
+
+// FIXED: Added className prop support
+export function Th({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return <th className={`px-3 py-2 font-semibold whitespace-nowrap ${className}`}>{children}</th>;
 }
+
 export function Td({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return <td className={`px-3 py-2 whitespace-nowrap ${className}`}>{children}</td>;
 }
@@ -64,7 +65,7 @@ export function DateTimeField({
   );
 }
 
-// עדכון: TextArea שתומך בהצעות (Autocomplete)
+// TextArea with Autocomplete support
 export function TextArea({
   label,
   value,
@@ -85,7 +86,7 @@ export function TextArea({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
-  // סגירת ההצעות כשלוחצים בחוץ
+  // Close suggestions when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
@@ -96,7 +97,7 @@ export function TextArea({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // הצגת ההצעות רק כשיש תוכן בהצעות והמשתמש בפוקוס
+  // Show suggestions when suggestions array changes (filtering)
   useEffect(() => {
     setShowSuggestions(suggestions.length > 0);
   }, [suggestions]);
@@ -114,7 +115,7 @@ export function TextArea({
                    focus-visible:outline-none focus:ring-2 focus:ring-foreground/40"
       />
       
-      {/* רשימת הצעות צפה */}
+      {/* Floating Suggestions List */}
       {showSuggestions && onSelectSuggestion && (
         <div className="absolute top-full mt-1 w-full bg-white dark:bg-neutral-900 border border-black/10 dark:border-white/10 rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
           {suggestions.map((s, idx) => (

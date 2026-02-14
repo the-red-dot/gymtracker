@@ -107,11 +107,14 @@ export default function NutritionPage() {
   const [entries, setEntries] = useState<NutritionEntry[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
+  // --- UI State for History List ---
+  const [visibleDaysCount, setVisibleDaysCount] = useState(3); // Start with 3 days visible
+
   // --- profile bits ---
   const [profile, setProfile] = useState<Profile | null>(null);
   const [activityLevel, setActivityLevel] = useState<ActivityLevel | null>(null);
   const [goals, setGoals] = useState<UserGoal[]>([]);
-  const [measurements, setMeasurements] = useState<any[]>([]); // New state for weight history
+  const [measurements, setMeasurements] = useState<any[]>([]);
 
   // --- AI state (text + photo) ---
   const [aiText, setAiText] = useState('');
@@ -154,7 +157,7 @@ export default function NutritionPage() {
         fetchActivity(uid), 
         fetchGoals(uid),
         fetchMealHistory(uid),
-        fetchMeasurements(uid) // New fetch
+        fetchMeasurements(uid)
       ]);
       setLoading(false);
     };
@@ -240,7 +243,6 @@ export default function NutritionPage() {
   const fetchProfile = async (uid: string) => {
     const { data, error } = await supabase
       .from('profiles')
-      // כאן מתבצעת השליפה המעודכנת של תאריך הלידה
       .select('user_id, gender, height_cm, weight_kg, body_fat_percent, birth_date')
       .eq('user_id', uid)
       .maybeSingle();
@@ -271,6 +273,9 @@ export default function NutritionPage() {
   /* -------- Derived: groups + today totals -------- */
   const groupsAll = useMemo(() => groupByDay(entries), [entries]);
   const groups = useMemo(() => groupsAll.slice(0, MAX_DAYS), [groupsAll]);
+  
+  // UI: חיתוך הקבוצות שמוצגות בפועל לפי visibleDaysCount
+  const visibleGroups = useMemo(() => groups.slice(0, visibleDaysCount), [groups, visibleDaysCount]);
 
   const todayKey = useMemo(() => {
     const d = new Date();
@@ -482,89 +487,80 @@ export default function NutritionPage() {
     setEntries((prev) => prev.filter((e) => e.id !== id));
   };
 
+  const TABS_CONFIG = [
+    { id: 'what', label: 'מה אכלתי', icon: '🍽️' },
+    { id: 'protein', label: 'מדדי חלבון', icon: '🥩' },
+    { id: 'calories', label: 'מדדים קלוריים', icon: '🔥' },
+    { id: 'bmi', label: 'BMI ומשקל', icon: '⚖️' },
+    { id: 'dietitian', label: 'דיאטנית AI', icon: '👩‍⚕️' },
+  ] as const;
+
   if (loading) return <p className="opacity-70">טוען…</p>;
   const aiTotals = sumTotalsAny(aiItems ?? []);
 
   /* -------- Render -------- */
   return (
-    <div className="mx-auto max-w-5xl space-y-8" dir="rtl">
+    <div className="mx-auto max-w-5xl space-y-6" dir="rtl">
       <header className="space-y-1">
         <h1 className="text-3xl font-bold tracking-tight">תזונה</h1>
         <p className="text-sm text-gray-600 dark:text-gray-300">
-          תאר/י בקצרה מה אכלת או צלמו את הצלחת—וקבל/י חישוב אוטומטי. מעקב חלבון, קלוריות ו-BMI 🎯
+          תאר/י בקצרה מה אכלת או צלמו את הצלחת—וקבל/י חישוב אוטומטי.
         </p>
       </header>
 
-      {/* ===== Tabs / Carousel header ===== */}
+      {/* ===== Tabs Navigation (Responsive) ===== */}
+      
+      {/* Mobile: Dropdown */}
+      <div className="md:hidden">
+        <label className="text-xs font-bold opacity-70 mb-1.5 block">תצוגה:</label>
+        <div className="relative">
+          <select
+            value={activeTab}
+            onChange={(e) => setActiveTab(e.target.value as any)}
+            className="w-full appearance-none bg-white dark:bg-neutral-800 border border-black/10 dark:border-white/20 rounded-xl py-3 pr-4 pl-10 text-base font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            {TABS_CONFIG.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.icon} {t.label}
+              </option>
+            ))}
+          </select>
+          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center px-3 text-gray-500">
+            <ChevronDownIcon className="h-4 w-4" />
+          </div>
+        </div>
+      </div>
+
+      {/* Desktop: Horizontal Buttons */}
       <nav
-        className="inline-flex rounded-lg ring-1 ring-black/10 dark:ring-white/10 overflow-hidden flex-wrap gap-1"
+        className="hidden md:inline-flex rounded-lg ring-1 ring-black/10 dark:ring-white/10 overflow-hidden flex-wrap gap-1"
         role="tablist"
         aria-label="תצוגות מדדים"
       >
-        <button
-          role="tab"
-          aria-selected={activeTab === 'what'}
-          className={`px-4 py-2 text-sm font-medium ${
-            activeTab === 'what'
-              ? 'bg-foreground text-background'
-              : 'bg-background text-foreground/80 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
-          }`}
-          onClick={() => setActiveTab('what')}
-        >
-          מה אכלתי
-        </button>
-        <button
-          role="tab"
-          aria-selected={activeTab === 'protein'}
-          className={`px-4 py-2 text-sm font-medium ${
-            activeTab === 'protein'
-              ? 'bg-foreground text-background'
-              : 'bg-background text-foreground/80 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
-          }`}
-          onClick={() => setActiveTab('protein')}
-        >
-          מדדי חלבון
-        </button>
-        <button
-          role="tab"
-          aria-selected={activeTab === 'calories'}
-          className={`px-4 py-2 text-sm font-medium ${
-            activeTab === 'calories'
-              ? 'bg-foreground text-background'
-              : 'bg-background text-foreground/80 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
-          }`}
-          onClick={() => setActiveTab('calories')}
-        >
-          מדדים קלוריים
-        </button>
-        <button
-          role="tab"
-          aria-selected={activeTab === 'bmi'}
-          className={`px-4 py-2 text-sm font-medium ${
-            activeTab === 'bmi'
-              ? 'bg-foreground text-background'
-              : 'bg-background text-foreground/80 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
-          }`}
-          onClick={() => setActiveTab('bmi')}
-        >
-          BMI ומשקל
-        </button>
-        <button
-          role="tab"
-          aria-selected={activeTab === 'dietitian'}
-          className={`px-4 py-2 text-sm font-medium flex items-center gap-2 ${
-            activeTab === 'dietitian'
-              ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white'
-              : 'bg-background text-foreground/80 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
-          }`}
-          onClick={() => setActiveTab('dietitian')}
-        >
-          <span>👩‍⚕️</span>
-          דיאטנית AI
-        </button>
+        {TABS_CONFIG.map((t) => {
+          const isActive = activeTab === t.id;
+          return (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={isActive}
+              className={`px-4 py-2 text-sm font-medium flex items-center gap-2 ${
+                isActive
+                  ? t.id === 'dietitian' 
+                    ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white'
+                    : 'bg-foreground text-background'
+                  : 'bg-background text-foreground/80 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
+              }`}
+              onClick={() => setActiveTab(t.id as any)}
+            >
+              <span>{t.icon}</span>
+              {t.label}
+            </button>
+          );
+        })}
       </nav>
 
-      {/* ===== Carousel body ===== */}
+      {/* ===== Active Tab Content ===== */}
       <div className="relative">
         {activeTab === 'protein' ? (
           <ProteinGoals
@@ -584,52 +580,47 @@ export default function NutritionPage() {
         ) : activeTab === 'bmi' ? (
           <BMIWidget userId={userId} profile={profile} />
         ) : activeTab === 'dietitian' ? (
-           // --- Dietitian Agent ---
            userId && (
                <DietitianAgent 
                  userId={userId} 
                  logs={entries} 
                  userGoals={goals} 
                  userProfileData={{...profile, activityLevel}}
-                 weightHistory={measurements} // Passing real weight data
+                 weightHistory={measurements}
                />
            )
         ) : null}
       </div>
 
-      {/* ===== הוספה חכמה (AI) — ONLY in "what" ===== */}
+      {/* ===== הוספה חכמה (AI) — רק בטאב "מה אכלתי" ===== */}
       {activeTab === 'what' && (
         <SectionCard title="הוספה חכמה (AI)">
-          <div className="grid gap-4">
-            {/* Text + Date */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* שימוש ברכיב TextArea המשודרג עם השלמה אוטומטית */}
-              <TextArea
-                label="מה אכלתי?"
-                placeholder='לדוגמה: "שניצל מטוגן עם פירה וסלט קטן" (או בחר מההיסטוריה)'
-                value={aiText}
-                onChange={setAiText}
-                className="md:col-span-2"
-                suggestions={suggestions}
-                onSelectSuggestion={(s) => setAiText(s)}
-              />
-              <DateTimeField
-                label="תאריך ושעה לארוחה"
+          <div className="space-y-4">
+            
+            {/* 1. TextArea - שורה ראשונה רחבה */}
+            <TextArea
+              label="מה אכלת?"
+              placeholder='לדוגמה: "חביתה משתי ביצים, סלט קטן וכף קוטג׳"'
+              value={aiText}
+              onChange={setAiText}
+              className="w-full"
+              suggestions={suggestions}
+              onSelectSuggestion={(s) => setAiText(s)}
+            />
+
+            {/* 2. Actions Row: Date, Camera, Gallery */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
+               <DateTimeField
+                label="מתי?"
                 value={aiOccurredLocal}
                 onChange={setAiOccurredLocal}
-                className="md:col-span-1"
+                className="w-full"
               />
-            </div>
 
-            {/* Photo controls */}
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Mobile camera icon button */}
-              <label
-                className="md:hidden inline-flex items-center gap-2 rounded-lg border border-black/10 dark:border-white/20 px-3 py-2 text-sm cursor-pointer hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-                title="צלם/י תמונה"
-              >
-                <CameraIcon className="w-5 h-5" />
-                <span>צלם/י</span>
+              {/* Camera Button (Mobile) */}
+              <label className="md:hidden flex items-center justify-center gap-2 rounded-lg border border-black/10 dark:border-white/20 py-2.5 text-sm font-medium cursor-pointer hover:bg-black/[.04] dark:hover:bg-white/[.06] bg-white dark:bg-white/5 h-[42px]">
+                <CameraIcon className="w-5 h-5 text-indigo-500" />
+                <span>צלם</span>
                 <input
                   type="file"
                   accept="image/*"
@@ -639,13 +630,10 @@ export default function NutritionPage() {
                 />
               </label>
 
-              {/* Desktop upload button */}
-              <label
-                className="hidden md:inline-flex items-center gap-2 rounded-lg border border-black/10 dark:border-white/20 px-3 py-2 text-sm cursor-pointer hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-                title="בחר/י תמונה"
-              >
-                <UploadIcon className="w-5 h-5" />
-                <span>העלאת תמונה</span>
+               {/* Upload Button (Desktop & Mobile) */}
+              <label className="flex items-center justify-center gap-2 rounded-lg border border-black/10 dark:border-white/20 py-2.5 text-sm font-medium cursor-pointer hover:bg-black/[.04] dark:hover:bg-white/[.06] bg-white dark:bg-white/5 h-[42px]">
+                <UploadIcon className="w-5 h-5 text-indigo-500" />
+                <span>{photoFile ? 'החלף תמונה' : 'גלריה/קובץ'}</span>
                 <input
                   type="file"
                   accept="image/*"
@@ -654,258 +642,272 @@ export default function NutritionPage() {
                 />
               </label>
 
-              {/* Current filename / clear */}
-              {photoFile && (
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="opacity-80">{photoFile.name}</span>
-                  <button
-                    type="button"
-                    onClick={clearPhoto}
-                    className="rounded-md border border-black/10 dark:border-white/20 px-2 py-1 text-xs hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-                  >
-                    הסר תמונה
-                  </button>
-                </div>
-              )}
+               {/* Clear Photo (Conditional) */}
+               {photoFile && (
+                 <button
+                   type="button"
+                   onClick={clearPhoto}
+                   className="flex items-center justify-center rounded-lg border border-red-200 dark:border-red-900/30 text-red-600 bg-red-50 dark:bg-red-900/10 py-2.5 text-sm font-medium h-[42px]"
+                 >
+                   הסר תמונה
+                 </button>
+               )}
             </div>
 
             {/* Preview (if any) */}
             {photoPreviewUrl && (
-              <div className="flex items-center gap-3">
+              <div className="relative rounded-lg overflow-hidden h-40 w-full bg-black/5 dark:bg-white/5 flex items-center justify-center border border-black/10 dark:border-white/10">
                 <img
                   src={photoPreviewUrl}
                   alt="תצוגה מקדימה"
-                  className="h-28 w-28 object-cover rounded-lg ring-1 ring-black/10 dark:ring-white/10"
+                  className="h-full object-contain"
                 />
-                <p className="text-xs opacity-70">
-                  התמונה נשלחת ל-Gemini לצורך ניתוח ולא נשמרת באפליקציה.
-                </p>
+                <div className="absolute bottom-2 right-2 bg-black/60 text-white text-[10px] px-2 py-1 rounded-full backdrop-blur-md">
+                   נשלח ל-Gemini לניתוח
+                </div>
               </div>
             )}
 
-            {/* Actions */}
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={runAi}
-                disabled={aiLoading}
-                className="rounded-lg px-4 py-2 h-11 bg-foreground text-background hover:opacity-90 disabled:opacity-50"
-              >
-                {aiLoading ? 'מחשב…' : 'חישוב AI'}
-              </button>
-              {aiItems && aiItems.length > 0 && (
+            {/* 3. Analyze Button - Big & Prominent */}
+            <button
+              onClick={runAi}
+              disabled={aiLoading || (!aiText.trim() && !photoFile)}
+              className="w-full rounded-xl py-3 bg-indigo-600 text-white font-bold shadow-md hover:bg-indigo-700 active:scale-[0.98] transition-all disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
+            >
+              {aiLoading ? (
                 <>
-                  <div className="text-sm opacity-80 self-center">
-                    סה״כ (AI): {fmtNum(aiTotals.calories)} קק״ל · חלבון {fmtNum(aiTotals.protein_g)}ג׳ · פחמ׳ {fmtNum(aiTotals.carbs_g)}ג׳ · שומן {fmtNum(aiTotals.fat_g)}ג׳
-                  </div>
-                  <button
-                    onClick={saveAiItems}
-                    disabled={aiSaving}
-                    aria-busy={aiSaving}
-                    className={`rounded-lg px-4 py-2 h-11 border border-black/10 dark:border-white/20
-                                ${aiSaving ? 'opacity-60 cursor-not-allowed' : 'hover:bg-black/[.04] dark:hover:bg-white/[.06]'}`}
-                  >
-                    {aiSaving ? 'שומר…' : 'הוסף הכל לרשומות'}
-                  </button>
-                  {aiSavedAt && !aiSaving && (
-                    <span className="text-sm text-emerald-600 self-center">נשמר! ✅</span>
-                  )}
+                  <span className="animate-spin">⌛</span> מנתח ומחשב...
+                </>
+              ) : (
+                <>
+                  <span>✨</span> נתח וחשב קלוריות
                 </>
               )}
-            </div>
+            </button>
 
-            {aiError && <p className="text-sm text-red-600">{aiError}</p>}
-
-            {/* AI table */}
-            {aiItems && aiItems.length > 0 && (
-              <div className="overflow-x-auto rounded-lg ring-1 ring-black/10 dark:ring-white/10">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-black/5 dark:bg-white/10">
-                    <tr className="text-right">
-                      <Th>פריט</Th>
-                      <Th>כמות (גרם)</Th>
-                      <Th>קלוריות</Th>
-                      <Th>חלבון (ג׳)</Th>
-                      <Th>פחמימות (ג׳)</Th>
-                      <Th>שומן (ג׳)</Th>
-                      <Th>הערות</Th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-black/10 dark:divide-white/10">
-                    {aiItems.map((it, idx) => (
-                      <tr key={idx}>
-                        <Td>
-                          <input
-                            type="text"
-                            value={it.item}
-                            onChange={(e) => updateAiItem(idx, { item: e.target.value })}
-                            className="w-48 md:w-64 rounded border border-black/10 dark:border-white/20 bg-transparent px-2 py-1"
-                          />
-                        </Td>
-                        <Td>
-                          <NumInput value={it.grams} onChange={(v) => updateAiItem(idx, { grams: Math.max(0, v) })} />
-                        </Td>
-                        <Td>
-                          <NumInput value={it.calories} onChange={(v) => updateAiItem(idx, { calories: v })} />
-                        </Td>
-                        <Td>
-                          <NumInput value={it.protein_g} onChange={(v) => updateAiItem(idx, { protein_g: v })} />
-                        </Td>
-                        <Td>
-                          <NumInput value={it.carbs_g} onChange={(v) => updateAiItem(idx, { carbs_g: v })} />
-                        </Td>
-                        <Td>
-                          <NumInput value={it.fat_g} onChange={(v) => updateAiItem(idx, { fat_g: v })} />
-                        </Td>
-                        <Td>
-                          <input
-                            type="text"
-                            value={it.notes ?? ''}
-                            onChange={(e) => updateAiItem(idx, { notes: e.target.value })}
-                            className="w-52 md:w-64 rounded border border-black/10 dark:border-white/20 bg-transparent px-2 py-1"
-                          />
-                        </Td>
-                        <Td>
-                          <button
-                            onClick={() => removeAiItem(idx)}
-                            className="text-xs rounded-md border border-black/10 dark:border-white/20 px-2 py-1 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-                          >
-                            הסר
-                          </button>
-                        </Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {/* Error Message */}
+            {aiError && (
+              <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-lg text-red-600 text-sm text-center">
+                {aiError}
               </div>
             )}
+
+            {/* Results Table */}
+            {aiItems && aiItems.length > 0 && (
+              <div className="space-y-3 animate-in fade-in slide-in-from-top-4">
+                <div className="flex justify-between items-center bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-lg border border-indigo-100 dark:border-indigo-900/30">
+                   <div className="text-sm font-medium text-indigo-900 dark:text-indigo-100">
+                     סה״כ: {fmtNum(aiTotals.calories)} קק״ל
+                   </div>
+                   <div className="text-xs text-indigo-700 dark:text-indigo-300 space-x-2 rtl:space-x-reverse">
+                      <span>🥩 {fmtNum(aiTotals.protein_g)}</span>
+                      <span>🍞 {fmtNum(aiTotals.carbs_g)}</span>
+                      <span>🥑 {fmtNum(aiTotals.fat_g)}</span>
+                   </div>
+                </div>
+
+                <div className="overflow-x-auto rounded-lg ring-1 ring-black/10 dark:ring-white/10">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-black/5 dark:bg-white/10 text-xs">
+                      <tr className="text-right">
+                        <Th>פריט</Th>
+                        <Th>כמות (גרם)</Th>
+                        <Th>קק"ל</Th>
+                        <Th>חלבון</Th>
+                        <Th>פחמ׳</Th>
+                        <Th>שומן</Th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-black/10 dark:divide-white/10 bg-white dark:bg-neutral-900">
+                      {aiItems.map((it, idx) => (
+                        <tr key={idx}>
+                          <Td>
+                            <input
+                              type="text"
+                              value={it.item}
+                              onChange={(e) => updateAiItem(idx, { item: e.target.value })}
+                              className="w-32 bg-transparent border-b border-transparent focus:border-indigo-500 focus:outline-none"
+                            />
+                          </Td>
+                          <Td>
+                            <NumInput value={it.grams} onChange={(v) => updateAiItem(idx, { grams: Math.max(0, v) })} />
+                          </Td>
+                          <Td>{it.calories}</Td>
+                          <Td>{it.protein_g}</Td>
+                          <Td>{it.carbs_g}</Td>
+                          <Td>{it.fat_g}</Td>
+                          <Td>
+                            <button
+                              onClick={() => removeAiItem(idx)}
+                              className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 p-1 rounded"
+                            >
+                              ✕
+                            </button>
+                          </Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                
+                <button
+                  onClick={saveAiItems}
+                  disabled={aiSaving}
+                  className="w-full py-3 rounded-xl bg-emerald-600 text-white font-bold shadow hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                >
+                  {aiSaving ? 'שומר...' : '✅ אשר והוסף ליומן'}
+                </button>
+              </div>
+            )}
+            
             {aiItems && aiItems.length === 0 && !aiLoading && (
-              <div className="text-sm opacity-70">לא זוהו פריטים מהטקסט/תמונה. נסו לתאר קצת יותר או תמונה ברורה יותר.</div>
+              <div className="text-sm opacity-70 text-center py-2">
+                לא זוהו פריטים. נסו לתאר בצורה מפורטת יותר.
+              </div>
+            )}
+            
+            {aiSavedAt && !aiSaving && (
+                <div className="text-center text-emerald-600 font-bold animate-in fade-in zoom-in">
+                    נשמר בהצלחה! 🎉
+                </div>
             )}
           </div>
         </SectionCard>
       )}
 
-      {/* ===== Groups by day — ONLY in "what" ===== */}
+      {/* ===== Groups by day (History) — ONLY in "what" ===== */}
       {activeTab === 'what' && (
-        <div className="grid gap-4">
-          {groups.map((g) => {
-            const isOpen = expanded[g.dayKey] ?? false;
-            return (
-              <section key={g.dayKey} className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background">
-                <button
-                  onClick={() => setExpanded((ex) => ({ ...ex, [g.dayKey]: !isOpen }))}
-                  className="w-full text-right p-4 md:p-6 flex flex-col gap-1 hover:bg-black/[.03] dark:hover:bg-white/[.04]"
-                >
-                  <div className="flex flex-wrap items-center gap-2 justify-between">
-                    <h2 className="text-lg md:text-xl font-semibold">{fmtDate.format(new Date(g.date))}</h2>
-                    <div className="text-sm md:text-base opacity-80">
-                      סה״כ: {fmtNum(g.totals.calories)} קק״ל · חלבון {fmtNum(g.totals.protein_g)}ג׳ · פחמ׳ {fmtNum(g.totals.carbs_g)}ג׳ · שומן {fmtNum(g.totals.fat_g)}ג׳
-                    </div>
-                  </div>
-                </button>
+        <div className="space-y-6">
+           <h3 className="text-lg font-bold opacity-80 px-1">היסטוריה</h3>
+           <div className="grid gap-4">
+             {/* Render only visible groups */}
+             {visibleGroups.map((g) => {
+                const isOpen = expanded[g.dayKey] ?? false;
+                return (
+                  <section key={g.dayKey} className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background overflow-hidden">
+                    <button
+                      onClick={() => setExpanded((ex) => ({ ...ex, [g.dayKey]: !isOpen }))}
+                      className="w-full text-right p-4 flex flex-col gap-1 hover:bg-black/[.03] dark:hover:bg-white/[.04] transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                           <div className={`text-lg font-bold ${isOpen ? 'text-indigo-600 dark:text-indigo-400' : ''}`}>
+                             {fmtDate.format(new Date(g.date))}
+                           </div>
+                           {/* Day Total Badge */}
+                           <span className="text-xs bg-black/5 dark:bg-white/10 px-2 py-0.5 rounded-full font-mono">
+                              {fmtNum(g.totals.calories)} kcal
+                           </span>
+                        </div>
+                        <ChevronDownIcon className={`w-5 h-5 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''} opacity-50`} />
+                      </div>
+                      
+                      {!isOpen && (
+                         <div className="text-xs opacity-60 flex gap-3 mt-1">
+                            <span>🥩 {fmtNum(g.totals.protein_g)}g</span>
+                            <span>🍞 {fmtNum(g.totals.carbs_g)}g</span>
+                            <span>🥑 {fmtNum(g.totals.fat_g)}g</span>
+                         </div>
+                      )}
+                    </button>
 
-                {isOpen && (
-                  <div className="p-4 md:p-6 pt-0">
-                    {/* Mobile cards */}
-                    <div className="grid gap-3 md:hidden">
-                      {g.items.map((e) => (
-                        <article key={e.id} className="rounded-lg ring-1 ring-black/10 dark:ring-white/10 p-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="text-sm font-medium">{fmtTime.format(new Date(e.occurred_at))}</div>
-                            <button
-                              onClick={() => deleteEntry(e.id)}
-                              className="text-xs rounded-md border border-black/10 dark:border-white/20 px-2 py-1 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-                            >
-                              מחק
-                            </button>
-                          </div>
-                          <div className="mt-1">
-                            <div className="font-medium leading-snug break-words">{e.item}</div>
-                            {e.amount && <div className="opacity-70 text-xs mt-0.5">{e.amount}</div>}
-                          </div>
-                          <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
-                              קלוריות&nbsp;{fmtNum(e.calories)}
-                            </span>
-                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
-                              חלבון&nbsp;{fmtNum(e.protein_g)}ג׳
-                            </span>
-                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
-                              פחמ׳&nbsp;{fmtNum(e.carbs_g)}ג׳
-                            </span>
-                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-black/10 dark:ring-white/10">
-                              שומן&nbsp;{fmtNum(e.fat_g)}ג׳
-                            </span>
-                          </div>
-                          {e.notes && (
-                            <div className="mt-2 text-xs leading-relaxed opacity-80 break-words whitespace-pre-wrap">
-                              {e.notes}
-                            </div>
-                          )}
-                        </article>
-                      ))}
-                    </div>
+                    {isOpen && (
+                      <div className="border-t border-black/5 dark:border-white/5 bg-gray-50/50 dark:bg-white/[.02]">
+                         {/* Mobile List View */}
+                         <div className="md:hidden divide-y divide-black/5 dark:divide-white/5">
+                           {g.items.map((e) => (
+                             <div key={e.id} className="p-3 flex justify-between items-start">
+                                <div className="space-y-0.5">
+                                   <div className="font-medium text-sm">{e.item}</div>
+                                   <div className="text-xs opacity-60">{fmtTime.format(new Date(e.occurred_at))} • {e.amount || '-'}</div>
+                                   {e.notes && <div className="text-xs opacity-50 italic">"{e.notes}"</div>}
+                                </div>
+                                <div className="text-right space-y-1">
+                                   <div className="font-mono text-sm font-bold">{Math.round(e.calories || 0)}</div>
+                                   <button 
+                                      onClick={() => deleteEntry(e.id)}
+                                      className="text-xs text-red-500 hover:text-red-600 px-2 py-1 rounded bg-red-50 dark:bg-red-900/10"
+                                   >
+                                      מחק
+                                   </button>
+                                </div>
+                             </div>
+                           ))}
+                         </div>
 
-                    {/* Desktop table */}
-                    <div className="hidden md:block overflow-x-auto rounded-lg ring-1 ring-black/10 dark:ring-white/10">
-                      <table className="min-w-full text-sm">
-                        <thead className="bg-black/5 dark:bg-white/10">
-                          <tr className="text-right">
-                            <Th>שעה</Th>
-                            <Th>פריט</Th>
-                            <Th>כמות</Th>
-                            <Th>קלוריות</Th>
-                            <Th>חלבון (ג׳)</Th>
-                            <Th>פחמימות (ג׳)</Th>
-                            <Th>שומן (ג׳)</Th>
-                            <Th>הערות</Th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-black/10 dark:divide-white/10">
-                          {g.items.map((e) => (
-                            <tr key={e.id}>
-                              <Td>{fmtTime.format(new Date(e.occurred_at))}</Td>
-                              <Td className="font-medium">{e.item}</Td>
-                              <Td className="opacity-80">{e.amount ?? ''}</Td>
-                              <Td>{fmtNum(e.calories)}</Td>
-                              <Td>{fmtNum(e.protein_g)}</Td>
-                              <Td>{fmtNum(e.carbs_g)}</Td>
-                              <Td>{fmtNum(e.fat_g)}</Td>
-                              <Td className="max-w-[18rem] truncate">{e.notes ?? ''}</Td>
-                              <Td>
-                                <button
-                                  onClick={() => deleteEntry(e.id)}
-                                  className="text-xs rounded-md border border-black/10 dark:border-white/20 px-2 py-1 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-                                >
-                                  מחק
-                                </button>
-                              </Td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </section>
-            );
-          })}
+                         {/* Desktop Table View */}
+                         <div className="hidden md:block overflow-x-auto p-4">
+                           <table className="min-w-full text-sm">
+                             <thead className="bg-black/5 dark:bg-white/10 rounded-lg">
+                               <tr className="text-right">
+                                 <Th className="rounded-r-lg">שעה</Th>
+                                 <Th>פריט</Th>
+                                 <Th>כמות</Th>
+                                 <Th>קלוריות</Th>
+                                 <Th>חלבון</Th>
+                                 <Th>פחמ׳</Th>
+                                 <Th>שומן</Th>
+                                 <Th className="rounded-l-lg">פעולות</Th>
+                               </tr>
+                             </thead>
+                             <tbody className="divide-y divide-black/10 dark:divide-white/10">
+                               {g.items.map((e) => (
+                                 <tr key={e.id}>
+                                   <Td>{fmtTime.format(new Date(e.occurred_at))}</Td>
+                                   <Td className="font-medium">{e.item}</Td>
+                                   <Td className="opacity-80">{e.amount ?? ''}</Td>
+                                   <Td>{fmtNum(e.calories)}</Td>
+                                   <Td>{fmtNum(e.protein_g)}</Td>
+                                   <Td>{fmtNum(e.carbs_g)}</Td>
+                                   <Td>{fmtNum(e.fat_g)}</Td>
+                                   <Td>
+                                     <button
+                                       onClick={() => deleteEntry(e.id)}
+                                       className="text-xs text-red-500 hover:text-red-700 font-medium"
+                                     >
+                                       מחק
+                                     </button>
+                                   </Td>
+                                 </tr>
+                               ))}
+                             </tbody>
+                           </table>
+                         </div>
+                      </div>
+                    )}
+                  </section>
+                );
+             })}
+           </div>
+           
+           {/* Load Actions */}
+           {activeTab === 'what' && (
+              <div className="pt-4 flex flex-col gap-3 items-center">
+                 {/* 1. Client-side expansion: Show more days from loaded list */}
+                 {visibleDaysCount < groups.length && (
+                    <button
+                      onClick={() => setVisibleDaysCount(prev => prev + 3)}
+                      className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 px-4 py-2 rounded-full transition-colors"
+                    >
+                       👇 הצג ימים נוספים
+                    </button>
+                 )}
+
+                 {/* 2. Server-side fetching: Load older days (only if we've shown everything or close to end) */}
+                 {hasMore && groupsAll.length < MAX_DAYS && visibleDaysCount >= groups.length && (
+                    <button
+                      onClick={() => userId && loadPage(userId, page + 1)}
+                      className="text-sm text-gray-500 border border-gray-200 dark:border-gray-800 px-4 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-white/5"
+                    >
+                      טען היסטוריה ישנה יותר מהשרת...
+                    </button>
+                 )}
+              </div>
+           )}
         </div>
       )}
 
-      {/* Load more only if we haven't reached the MAX_DAYS cap — ONLY in "what" */}
-      {activeTab === 'what' && hasMore && groupsAll.length < MAX_DAYS && (
-        <div className="pt-2">
-          <button
-            onClick={() => userId && loadPage(userId, page + 1)}
-            className="rounded-lg border border-black/10 dark:border-white/20 px-4 py-2 text-sm hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-          >
-            טען ימים ישנים יותר
-          </button>
-        </div>
-      )}
-
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 text-center bg-red-50 dark:bg-red-900/20 p-2 rounded">{error}</p>}
     </div>
   );
 
@@ -966,6 +968,13 @@ function UploadIcon(props: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={props.className}>
       <path d="M12 16V4m0 0 4 4m-4-4-4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+    </svg>
+  );
+}
+function ChevronDownIcon(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}>
+      <polyline points="6 9 12 15 18 9" />
     </svg>
   );
 }

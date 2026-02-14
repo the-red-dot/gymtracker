@@ -807,7 +807,7 @@ function EquipmentPageView(props: {
    
   // AI
   openAiModal: () => void;
-  hasSavedPlan: boolean; // NEW: to decide if we show the "Show Plan" button
+  hasSavedPlan: boolean;
 
   // equipment list + selection
   equipViews: EquipView[];
@@ -885,7 +885,7 @@ function EquipmentPageView(props: {
   }, [equipViews, search, activeCat, selected]);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8" dir="rtl">
+    <div className="mx-auto max-w-6xl space-y-6" dir="rtl">
       <header className="space-y-2 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">בחירת מכשירים</h1>
@@ -901,7 +901,7 @@ function EquipmentPageView(props: {
                 className="inline-flex items-center gap-2 bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-gray-800 dark:text-white px-4 py-2 rounded-full font-medium shadow-sm hover:bg-gray-50 transition-all"
                 >
                 <span className="text-lg">📋</span>
-                הצג תוכנית
+                <span className="hidden sm:inline">הצג תוכנית</span>
                 </button>
             )}
 
@@ -910,14 +910,16 @@ function EquipmentPageView(props: {
             className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-4 py-2 rounded-full font-medium shadow hover:shadow-lg transition-all hover:scale-105"
             >
             <MagicIcon className="w-4 h-4" />
-            בניית תוכנית AI
+            <span>בניית תוכנית AI</span>
             </button>
         </div>
       </header>
 
-      {/* Tabs bar */}
-      <section className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background">
-        <div className="p-3 md:p-4 flex items-center justify-between gap-2 border-b border-black/10 dark:border-white/10">
+      {/* Tabs bar - Responsive Design */}
+      <section className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background overflow-hidden">
+        
+        {/* Desktop View: Original Horizontal List */}
+        <div className="hidden md:flex p-3 md:p-4 items-center justify-between gap-2 border-b border-black/10 dark:border-white/10">
           <div className="flex items-center gap-2 overflow-x-auto pb-1">
             {tabs.map((t) => {
               const isActive = t.id === activeTabId;
@@ -939,7 +941,7 @@ function EquipmentPageView(props: {
               );
             })}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {activeTabId != null && (
               <>
                 <button
@@ -973,15 +975,59 @@ function EquipmentPageView(props: {
           </div>
         </div>
 
-        {/* Quick filter inside the same card */}
-        <div className="p-4 md:p-6 grid gap-4">
+        {/* Mobile View: Clean Dropdown & Actions */}
+        <div className="md:hidden p-4 space-y-3 bg-gray-50/50 dark:bg-white/5">
+             <div className="relative">
+                <label className="text-xs font-bold opacity-50 mb-1 block px-1">בחר אימון לעריכה:</label>
+                <div className="relative">
+                    <select
+                        value={activeTabId || ''}
+                        onChange={(e) => setActiveTabId(Number(e.target.value))}
+                        className="w-full appearance-none bg-white dark:bg-neutral-800 border border-black/10 dark:border-white/20 rounded-xl py-3 pr-4 pl-10 text-base font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                        {tabs.map(t => (
+                            <option key={t.id} value={t.id}>{t.emoji || '🏷️'} {t.name}</option>
+                        ))}
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center px-3 text-gray-500">
+                        <ChevronDownIcon className="h-5 w-5" />
+                    </div>
+                </div>
+             </div>
+             
+             <div className="grid grid-cols-3 gap-2">
+                 <button onClick={createTab} className="col-span-1 bg-white dark:bg-white/10 border border-black/5 dark:border-white/10 py-2.5 rounded-lg text-sm font-medium shadow-sm active:scale-95 transition-transform">
+                    + חדש
+                 </button>
+                 {activeTabId != null && (
+                    <>
+                        <button onClick={() => { const t = tabs.find((x) => x.id === activeTabId); if(t) renameTab(t); }} className="col-span-1 bg-white dark:bg-white/10 border border-black/5 dark:border-white/10 py-2.5 rounded-lg text-sm font-medium shadow-sm active:scale-95 transition-transform">
+                           שנה שם
+                        </button>
+                        {tabs.length > 1 ? (
+                            <button onClick={() => { const t = tabs.find((x) => x.id === activeTabId); if(t) deleteTab(t); }} className="col-span-1 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 py-2.5 rounded-lg text-sm font-medium shadow-sm active:scale-95 transition-transform">
+                                מחק
+                            </button>
+                        ) : (
+                            <div className="col-span-1"></div>
+                        )}
+                    </>
+                 )}
+             </div>
+        </div>
+      </section>
+
+      {/* Filter Section - Responsive */}
+      <div className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background p-4 md:p-6 grid gap-4">
           <SearchField
-            label="חיפוש"
+            label="חיפוש מכשירים"
             placeholder="למשל: חזה / Chest / Row / כתפיים / בייספס…"
             value={search}
             onChange={setSearch}
           />
-          <div className="flex gap-2 overflow-x-auto pb-1">
+          
+          {/* Desktop Categories List */}
+          <div className="hidden md:flex gap-2 overflow-x-auto pb-1">
             {CATEGORIES.map((c) => {
               const isPicked = c.key === 'picked';
               const pickedCount = isPicked ? (activeTabId ? selected.size : 0) : 0;
@@ -1014,10 +1060,53 @@ function EquipmentPageView(props: {
               );
             })}
           </div>
-        </div>
-      </section>
 
-      {/* גריד מכשירים */}
+          {/* Mobile Categories Control */}
+          <div className="md:hidden grid grid-cols-2 gap-3">
+             {/* Picked Toggle */}
+             <button
+                onClick={() => setActiveCat(activeCat === 'picked' ? 'all' : 'picked')}
+                className={`flex flex-col items-center justify-center gap-1 rounded-xl border py-2.5 text-sm font-bold transition-all
+                  ${activeCat === 'picked'
+                    ? 'bg-emerald-500 text-white border-emerald-600 shadow-md ring-2 ring-emerald-200 dark:ring-emerald-900'
+                    : 'bg-white dark:bg-neutral-800 border-black/10 dark:border-white/20 text-gray-600 dark:text-gray-300'
+                  }`}
+             >
+                <div className="flex items-center gap-2">
+                    <span>{activeCat === 'picked' ? '✅' : '○'}</span>
+                    <span>הנבחרים שלי</span>
+                </div>
+                {activeTabId && selected.size > 0 && (
+                   <span className={`text-[10px] px-2 rounded-full ${activeCat === 'picked' ? 'bg-white/20' : 'bg-black/5 dark:bg-white/10'}`}>
+                      {selected.size} מכשירים
+                   </span>
+                )}
+             </button>
+
+             {/* Categories Dropdown */}
+             <div className="relative">
+                <select
+                   value={activeCat === 'picked' ? 'all' : activeCat}
+                   onChange={(e) => setActiveCat(e.target.value as FilterKey)}
+                   className={`w-full h-full appearance-none border rounded-xl px-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 text-right
+                       ${activeCat !== 'picked' 
+                          ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-300 dark:border-indigo-800' 
+                          : 'bg-white text-gray-500 border-black/10 dark:bg-neutral-800 dark:border-white/20 dark:text-gray-400'}
+                   `}
+                >
+                   <option value="all">כל הקטגוריות</option>
+                   {CATEGORIES.filter(c => c.key !== 'picked' && c.key !== 'all').map(c => (
+                      <option key={c.key} value={c.key}>{c.label}</option>
+                   ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-current opacity-50">
+                    <ChevronDownIcon className="h-4 w-4" />
+                </div>
+             </div>
+          </div>
+      </div>
+
+      {/* גריד מכשירים (ללא שינוי, רק מציג קטגוריה אם מסונן) */}
       <section className="grid gap-6">
         {activeCat !== 'all' && activeCat !== 'picked' ? (
           <h2 className="text-xl font-semibold">{categoryHeb(activeCat as CategoryKey)}</h2>
@@ -1116,8 +1205,8 @@ function EquipmentPageView(props: {
       {/* סרגל פעולה בתחתית */}
       <div className="sticky bottom-3">
         <div className="mx-auto max-w-6xl">
-          <div className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background/90 supports-[backdrop-filter]:bg-background/75 backdrop-blur p-3 md:p-4 flex flex-col md:flex-row items-center gap-3 md:gap-4 justify-between">
-            <div className="text-sm">
+          <div className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background/90 supports-[backdrop-filter]:bg-background/75 backdrop-blur p-3 md:p-4 flex flex-col md:flex-row items-center gap-3 md:gap-4 justify-between shadow-lg">
+            <div className="text-sm text-center md:text-right">
               טאב נוכחי:{' '}
               <b>{(tabs.find((t) => t.id === activeTabId)?.name) || '—'}</b>{' '}
               · <b>{selected.size}</b> מכשירים נבחרו
@@ -1126,17 +1215,17 @@ function EquipmentPageView(props: {
                 <span className="opacity-70"> (יש שינויים שלא נשמרו)</span>
               ) : null}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full md:w-auto">
               <button
                 onClick={clearSelection}
-                className="rounded-lg border border-black/10 dark:border-white/20 px-3 py-2 text-sm hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                className="flex-1 md:flex-none rounded-lg border border-black/10 dark:border-white/20 px-3 py-2 text-sm hover:bg-black/[.04] dark:hover:bg-white/[.06]"
               >
-                נקה בחירות בטאב
+                נקה בחירות
               </button>
               <button
                 disabled={saving || !activeTabId}
                 onClick={save}
-                className="rounded-lg px-4 py-2 h-11 bg-foreground text-background hover:opacity-90 disabled:opacity-50"
+                className="flex-1 md:flex-none rounded-lg px-4 py-2 h-11 bg-foreground text-background hover:opacity-90 disabled:opacity-50 font-medium"
               >
                 {saving ? 'שומר…' : 'שמור לטאב'}
               </button>
@@ -1328,7 +1417,7 @@ function ImageLightbox({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in"
       role="dialog"
       aria-modal="true"
       onClick={onClose}
@@ -1337,7 +1426,7 @@ function ImageLightbox({
         <button
           type="button"
           onClick={onClose}
-          className="absolute -top-3 -left-3 md:top-0 md:left-0 translate-y-[-100%] md:translate-y-0 md:-translate-x-full rounded-md bg-white/90 text-black text-sm px-3 py-1 shadow hover:bg-white"
+          className="absolute -top-10 left-0 md:-left-10 text-white opacity-70 hover:opacity-100"
           aria-label="סגור"
         >
           ✕ סגור
@@ -1346,7 +1435,7 @@ function ImageLightbox({
         <img
           src={url}
           alt={alt}
-          className="max-h-[85vh] w-full object-contain rounded-lg shadow-lg bg-white"
+          className="max-h-[85vh] w-full object-contain rounded-lg shadow-2xl bg-white"
         />
       </div>
     </div>
@@ -1359,6 +1448,14 @@ function MagicIcon(props: { className?: string }) {
       <path d="M15 4V2m0 2l-2-2m2 2l2-2M15 4h2M15 4H13" />
       <path d="M19 15v-2m0 2l-2-2m2 2l2-2M19 15h2M19 15h-2" />
       <path d="M8.5 4a5.5 5.5 0 0 1 5.5 5.5v1a5.5 5.5 0 0 1-5.5 5.5H8a5.5 5.5 0 0 1-5.5-5.5v-1A5.5 5.5 0 0 1 8 5.5h.5Z" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}>
+      <polyline points="6 9 12 15 18 9" />
     </svg>
   );
 }
