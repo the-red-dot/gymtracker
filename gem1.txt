@@ -1,0 +1,3536 @@
+i will share with you my project,
+This is a React / Next.js project that uses Supabase, deployed on Vercel and developed in Visual Studio Code.
+once you have part one write when you ready for part two.
+
+Folder: src
+    Folder: app
+        File: favicon.ico
+            [Could not read file: 'utf-8' codec can't decode byte 0x96 in position 50: invalid start byte]
+        File: globals.css
+            Code:
+            /* gym-tracker-app\src\app\globals.css */
+            
+            
+            @import "tailwindcss";
+            
+            :root {
+              --background: #ffffff;
+              --foreground: #171717;
+            }
+            
+            @theme inline {
+              --color-background: var(--background);
+              --color-foreground: var(--foreground);
+              --font-sans: var(--font-geist-sans);
+              --font-mono: var(--font-geist-mono);
+            }
+            
+            @media (prefers-color-scheme: dark) {
+              :root {
+                --background: #0a0a0a;
+                --foreground: #ededed;
+              }
+            }
+            
+            body {
+              background: var(--background);
+              color: var(--foreground);
+              font-family: Arial, Helvetica, sans-serif;
+            }
+            
+        File: layout.tsx
+            Code:
+            import type { Metadata } from "next";
+            import { Geist, Geist_Mono } from "next/font/google";
+            import "./globals.css";
+            import Navbar from "@/components/Navbar"; // <= uses src/components
+            
+            const geistSans = Geist({
+              variable: "--font-geist-sans",
+              subsets: ["latin"],
+            });
+            
+            const geistMono = Geist_Mono({
+              variable: "--font-geist-mono",
+              subsets: ["latin"],
+            });
+            
+            export const metadata: Metadata = {
+              title: "GymTracker",
+              description: "Track your workouts and progress",
+            };
+            
+            export default function RootLayout({
+              children,
+            }: Readonly<{
+              children: React.ReactNode;
+            }>) {
+              return (
+                <html lang="en">
+                  <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+                    <Navbar />
+                    <main className="mx-auto max-w-6xl px-4 sm:px-6 py-8">
+                      {children}
+                    </main>
+                    <footer className="mx-auto max-w-6xl px-4 sm:px-6 py-8 text-sm opacity-80">
+                      © {new Date().getFullYear()} GymTracker
+                    </footer>
+                  </body>
+                </html>
+              );
+            }
+        File: page.tsx
+            Code:
+            // src/app/page.tsx
+            'use client';
+            
+            /**
+             * עמוד בית מעודכן: כולל מדריך צעדים (אקורדיון) להתחלה מהירה, הסברים על ה-API, והפניות לעמודים השונים.
+             */
+            
+            import Link from 'next/link';
+            import { useState, useEffect } from 'react';
+            
+            export default function Home() {
+              // API Key Modal State
+              const [showKeyModal, setShowKeyModal] = useState(false);
+              const [apiKey, setApiKey] = useState('');
+            
+              // Load API Key from local storage (on mount)
+              useEffect(() => {
+                if (typeof window !== 'undefined') {
+                  const storedKey = localStorage.getItem('gemini_api_key');
+                  if (storedKey) setApiKey(storedKey);
+                }
+              }, []);
+            
+              const saveApiKey = () => {
+                if (typeof window !== 'undefined') {
+                  if (apiKey.trim()) {
+                    localStorage.setItem('gemini_api_key', apiKey.trim());
+                  } else {
+                    localStorage.removeItem('gemini_api_key');
+                  }
+                }
+                setShowKeyModal(false);
+              };
+            
+              const deleteApiKey = () => {
+                if (typeof window !== 'undefined') {
+                  localStorage.removeItem('gemini_api_key');
+                }
+                setApiKey('');
+              };
+            
+              return (
+                <section className="grid gap-6 sm:gap-8 max-w-3xl" dir="rtl">
+                  {/* Beta Banner */}
+                  <div className="rounded-lg border border-amber-300/60 bg-amber-500/10 text-amber-800 dark:text-amber-300 px-4 py-3 text-sm">
+                    🚧 גרסת בטא: האתר בפיתוח פעיל — ייתכנו שינויים ותקלות. נשמח לשמוע מכם משוב!
+                    {' '}
+                    <Link href="/about" className="underline underline-offset-4 hover:opacity-90">
+                      קראו עוד באודות
+                    </Link>
+                    .
+                  </div>
+            
+                  <header className="space-y-2">
+                    <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
+                      ברוכים הבאים ל-GymTracker 💪
+                    </h1>
+                    <p className="text-base sm:text-lg text-gray-600 dark:text-gray-300">
+                      המקום שלך לעקוב, להבין ולהתמיד. בואו נעשה סדר בבלאגן.
+                    </p>
+                  </header>
+            
+                  {/* --- רכיב המדריך החדש (אקורדיון) --- */}
+                  <GuideSection onOpenApiKey={() => setShowKeyModal(true)} />
+            
+                  {/* כותרת משנית לגישה מהירה */}
+                  <div className="pt-4 border-t border-black/5 dark:border-white/5">
+                    <h3 className="text-lg font-semibold mb-3">גישה מהירה</h3>
+                    
+                    {/* קישורי פעולה מהירים */}
+                    <div className="flex flex-col sm:flex-row flex-wrap gap-3">
+                      <Link
+                        href="/workouts/start"
+                        className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 bg-foreground text-background hover:opacity-90"
+                      >
+                        התחל/י אימון 🏋️
+                      </Link>
+                      <Link
+                        href="/nutrition"
+                        className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                      >
+                        הוספת אכילה 🍽️
+                      </Link>
+                      <Link
+                        href="/profile"
+                        className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                      >
+                        עדכון פרופיל 📏
+                      </Link>
+                      <Link
+                        href="/equipment"
+                        className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                      >
+                        מכשירים 🧰
+                      </Link>
+                    </div>
+                  </div>
+            
+                  <footer className="pt-2 text-xs text-center text-gray-500 dark:text-gray-400">
+                    טיפ: קוד ג'מיני נשמר מקומית בדפדפן או בבסיס הנתונים שלך. הפרטיות שלך חשובה לנו. 🔒
+                  </footer>
+            
+                  {/* API Key Modal */}
+                  {showKeyModal && (
+                    <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" dir="rtl">
+                      <div className="bg-white dark:bg-neutral-900 rounded-xl shadow-xl w-full max-w-md overflow-hidden ring-1 ring-white/10 animate-in fade-in zoom-in duration-200">
+                        <div className="p-4 border-b border-black/10 dark:border-white/10 flex justify-between items-center bg-gray-50 dark:bg-white/5">
+                          <h3 className="font-semibold text-lg">הגדרת מפתח AI אישי 🤖</h3>
+                          <button 
+                            onClick={() => setShowKeyModal(false)} 
+                            className="text-2xl leading-none opacity-50 hover:opacity-100 px-2"
+                            aria-label="סגור"
+                          >
+                            ×
+                          </button>
+                        </div>
+                        
+                        <div className="p-5 space-y-5 text-sm">
+                          <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
+                            כדי להשתמש בפיצ'ר ה-AI (זיהוי תמונות וניתוח תזונה) ללא מגבלות, מומלץ להזין מפתח API אישי משלך.
+                          </p>
+            
+                          <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg text-blue-800 dark:text-blue-200 space-y-2 border border-blue-100 dark:border-blue-800/30">
+                            <div className="font-bold flex items-center gap-2">
+                              <span>🔑</span> איך משיגים מפתח?
+                            </div>
+                            <ol className="list-decimal list-inside space-y-1 opacity-90 text-xs sm:text-sm">
+                              <li>
+                                היכנס/י ל־
+                                <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noreferrer" className="underline font-bold mx-1 hover:text-blue-600">
+                                  Google AI Studio
+                                </a>
+                              </li>
+                              <li>לחצ/י על הכפתור הכחול <span className="font-mono bg-black/5 px-1 rounded mx-1">Create API key</span>.</li>
+                              <li>בחלון שנפתח, העתק/י את רצף האותיות (API Key).</li>
+                              <li>הדבק/י אותו בשדה למטה.</li>
+                            </ol>
+                          </div>
+            
+                          <div className="space-y-2">
+                            <label className="font-medium block">API Key שלך</label>
+                            <input 
+                              type="text" 
+                              value={apiKey}
+                              onChange={(e) => setApiKey(e.target.value)}
+                              placeholder="הדבק כאן (מתחיל ב-AIzaSy...)"
+                              className="w-full rounded-md border border-black/10 dark:border-white/20 bg-transparent px-3 py-2 text-left ltr font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                            />
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              🔒 <b>פרטיות:</b> המפתח נשמר <u>בדפדפן שלך בלבד</u> (Local Storage) ואינו מועבר לאתר שלנו או לצד שלישי (למעט גוגל בעת השימוש).
+                            </p>
+                          </div>
+            
+                          <div className="flex gap-3 pt-2">
+                            <button 
+                              onClick={saveApiKey}
+                              className="flex-1 bg-foreground text-background py-2 rounded-md font-medium hover:opacity-90 transition shadow-sm"
+                            >
+                              שמור הגדרות
+                            </button>
+                            {apiKey && (
+                              <button 
+                                onClick={deleteApiKey}
+                                className="px-4 py-2 text-red-600 border border-red-200 dark:border-red-900/30 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition"
+                              >
+                                מחק מפתח
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              );
+            }
+            
+            // --- קומפוננטת המדריך (אקורדיון) ---
+            function GuideSection({ onOpenApiKey }: { onOpenApiKey: () => void }) {
+              const [activeStep, setActiveStep] = useState<number | null>(0); // פותח את הראשון כברירת מחדל
+            
+              const steps = [
+                {
+                  id: 0,
+                  title: '1. המנוע של המערכת (API Key) 🔑',
+                  short: 'חובה להתחלה - חינמי, מאובטח ובשליטה שלך.',
+                  content: (
+                    <div className="space-y-3">
+                      <p>
+                        כדי שהאתר יוכל "לחשוב" (לנתח ארוחות, לבנות תפריטים ולהציע אימונים), הוא זקוק למפתח גישה למודל ה-AI של גוגל.
+                      </p>
+                      <ul className="list-disc list-inside space-y-1 opacity-90 text-sm">
+                        <li><strong>למה זה חובה?</strong> בלי זה, כל הפיצ'רים החכמים יהיו מושבתים.</li>
+                        <li><strong>זה עולה כסף?</strong> לא! גוגל מאפשרת להוציא מפתח לשימוש אישי בחינם.</li>
+                        <li><strong>פרטיות:</strong> המפתח נשמר רק אצלך בדפדפן. תמיד אפשר למחוק אותו.</li>
+                      </ul>
+                      <div className="mt-2">
+                        <button onClick={onOpenApiKey} className="inline-flex items-center gap-2 text-sm bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition shadow-sm">
+                          🔑 לחץ להגדרת מפתח עכשיו
+                        </button>
+                      </div>
+                    </div>
+                  )
+                },
+                {
+                  id: 1,
+                  title: '2. הפרופיל שלך 👤',
+                  short: 'הגדרת גיל, משקל וגובה לדיוק מקסימלי.',
+                  content: (
+                    <div className="space-y-3">
+                      <p>
+                        אחרי שהגדרת את המפתח, המערכת צריכה להכיר אותך.
+                      </p>
+                      <p>
+                        בלי גיל, גובה ומשקל, לא נוכל לחשב שריפת קלוריות או להתאים לך תפריט.
+                        <br/>
+                        זה לוקח דקה וזה הבסיס להכל.
+                      </p>
+                      <Link href="/profile" className="text-sm bg-black/5 dark:bg-white/10 px-3 py-1.5 rounded inline-block mt-1 font-medium hover:bg-black/10 dark:hover:bg-white/20 transition">
+                        מעבר לעדכון פרופיל &larr;
+                      </Link>
+                    </div>
+                  )
+                },
+                {
+                  id: 2,
+                  title: '3. גאונות התזונה 🥗',
+                  short: 'ניתוח ארוחות, סקירות יומיות ובניית תפריט.',
+                  content: (
+                    <div className="space-y-3">
+                      <p>
+                        עמוד התזונה הוא ה"מוח" של האתר. הנה מה שאפשר לעשות שם:
+                      </p>
+                      <ul className="list-disc list-inside space-y-1 opacity-90 text-sm">
+                        <li><strong>תיעוד מהיר:</strong> פשוט כתבו "חביתה וקוטג'" או העלו תמונה – ה-AI יחשב לבד קלוריות וחלבון.</li>
+                        <li><strong>סקירות חכמות:</strong> בלחיצת כפתור, תקבלו ניתוח יומי או שבועי: האם עמדתם ביעדים? מה חסר?</li>
+                        <li><strong>בניית תפריט:</strong> ה-AI יכול לבנות לכם תוכנית אכילה מלאה המותאמת להעדפות שלכם.</li>
+                      </ul>
+                      <Link href="/nutrition" className="text-sm bg-black/5 dark:bg-white/10 px-3 py-1.5 rounded inline-block mt-1 font-medium hover:bg-black/10 dark:hover:bg-white/20 transition">
+                        מעבר לתזונה &larr;
+                      </Link>
+                    </div>
+                  )
+                },
+                {
+                  id: 3,
+                  title: '4. אימונים חכמים 🏋️',
+                  short: 'בחירת מכשירים, בניית תוכנית ומעקב זמן אמת.',
+                  content: (
+                    <div className="space-y-3">
+                      <p>
+                        כדי להתאמן יעיל, לא צריך לנחש:
+                      </p>
+                      <ol className="list-decimal list-inside space-y-2 opacity-90 text-sm">
+                        <li><strong>הגדרת ציוד:</strong> כנסו ל"מכשירים" וסמנו מה יש לכם (משקולות, מכונות, גומיות).</li>
+                        <li><strong>בניית תוכנית AI:</strong> בקשו מהמאמן הווירטואלי לבנות לכם תוכנית (למשל "AB" או "פול בודי") המבוססת <u>רק</u> על הציוד שלכם.</li>
+                        <li><strong>בזמן אימון:</strong> לחצו על "התחל אימון", הפעילו את השעון ⏱️, ותעדו כל סט. בסוף לחצו על "סיים אימון" כדי לשמור היסטוריה.</li>
+                      </ol>
+                      <Link href="/equipment" className="text-sm bg-black/5 dark:bg-white/10 px-3 py-1.5 rounded inline-block mt-1 font-medium hover:bg-black/10 dark:hover:bg-white/20 transition">
+                        הגדרת מכשירים &larr;
+                      </Link>
+                    </div>
+                  )
+                }
+              ];
+            
+              return (
+                <div className="space-y-4">
+                  <h2 className="text-xl font-bold opacity-90">איך מתחילים? 🚀</h2>
+                  <div className="grid gap-3">
+                    {steps.map((step) => (
+                      <div key={step.id} className={`rounded-xl border transition-all duration-300 overflow-hidden ${
+                        activeStep === step.id 
+                          ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/10 shadow-md ring-1 ring-indigo-500/20' 
+                          : 'border-black/5 dark:border-white/5 bg-white dark:bg-white/5 hover:border-black/10'
+                      }`}>
+                        <button 
+                          onClick={() => setActiveStep(activeStep === step.id ? null : step.id)}
+                          className="w-full text-right p-4 flex items-center justify-between gap-4"
+                        >
+                          <div>
+                            <div className={`font-bold text-base ${activeStep === step.id ? 'text-indigo-700 dark:text-indigo-300' : ''}`}>
+                              {step.title}
+                            </div>
+                            <div className="text-xs opacity-70 mt-0.5">{step.short}</div>
+                          </div>
+                          <div className={`transition-transform duration-300 opacity-50 ${activeStep === step.id ? 'rotate-180' : ''}`}>
+                            ▼
+                          </div>
+                        </button>
+                        
+                        <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${activeStep === step.id ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                          <div className="overflow-hidden">
+                            <div className="p-4 pt-0 text-sm leading-relaxed opacity-90 border-t border-black/5 dark:border-white/5 mt-2">
+                              <div className="pt-3">
+                                {step.content}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            }
+        Folder: about
+            File: page.tsx
+                Code:
+                // src/app/about/page.tsx
+                import Link from 'next/link';
+                
+                export default function AboutPage() {
+                  return (
+                    <section className="grid gap-6 sm:gap-8 max-w-3xl" dir="rtl">
+                      {/* Header */}
+                      <header className="space-y-2">
+                        <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
+                          אודות GymTracker 💪
+                        </h1>
+                        <p className="text-base sm:text-lg text-gray-600 dark:text-gray-300">
+                          אפליקציה קלילה שעוזרת לך לתעד אימונים ותזונה, להבין מגמות ולהישאר עקביים — בלי כאב ראש.
+                        </p>
+                      </header>
+                
+                      {/* What is inside */}
+                      <section className="grid gap-2">
+                        <h2 className="text-xl font-semibold">מה יש כאן? ✨</h2>
+                        <ul className="list-disc pr-5 space-y-1 text-sm sm:text-base">
+                          <li>🏋️ <strong>אימונים</strong> — תיעוד סטים, חזרות, משקלים וזמן אימון.</li>
+                          <li>🥗 <strong>תזונה</strong> — קלוריות ומאקרו לכל ארוחה, כולל חישוב אוטומטי.</li>
+                          <li>📏 <strong>פרופיל ומדידות</strong> — גובה, משקל, היקפים ועוד לאורך זמן.</li>
+                          <li>🧰 <strong>מכשירים</strong> — יצירת טאבים לפי סוג אימון והתאמת ציוד.</li>
+                        </ul>
+                      </section>
+                
+                      {/* Quick Start based on your instructions */}
+                      <section className="grid gap-2">
+                        <h2 className="text-xl font-semibold">איך מתחילים — בקצרה 🚀</h2>
+                        <ol className="list-decimal pr-5 space-y-3 text-sm sm:text-base">
+                          <li>
+                            היכנס/י ל־{' '}
+                            <Link href="/profile" className="underline underline-offset-4">
+                              עמוד הפרופיל
+                            </Link>{' '}
+                            ועדכן/ני פרטים. לאחר מכן עבור/י ללשונית <strong>פעילות ומטרות</strong> ולעדכון היעדים.
+                            בלשונית <strong>מדידות</strong> עדכן/ני לפחות את <strong>המשקל</strong> כדי לאתחל את מערכת התזונה. 📋
+                          </li>
+                          <li>
+                            גשו אל{' '}
+                            <Link href="/equipment" className="underline underline-offset-4">
+                              עמוד המכשירים
+                            </Link>{' '}
+                            וצרו טאבים לפי סוגי אימון (לדוגמה: “אימוני כוח”, “קרדיו”, “פלג גוף תחתון”).
+                            לכל טאב בחרו את המכשירים/תרגילים שלו. 🧰
+                          </li>
+                          <li>
+                            עברו ל־{' '}
+                            <Link href="/nutrition" className="underline underline-offset-4">
+                              עמוד התזונה
+                            </Link>{' '}
+                            לקביעת <strong>יעדי חלבון</strong> ו<strong>קלוריות</strong>, ואז הזינו את הארוחות היומיות.  
+                            שימו לב: המערכת משתמשת ב־AI — ייתכנו סטיות קטנות, ותמיד אפשר לערוך ידנית. אם עדכנתם קלוריות למנה,
+                            שאר המאקרו (שומן/פחמימות וכו׳) יתעדכנו אוטומטית בהתאם. 🤖🍽️
+                          </li>
+                          <li>
+                            ב־{' '}
+                            <Link href="/workouts/start" className="underline underline-offset-4">
+                              עמוד התחלת האימון
+                            </Link>{' '}
+                            לחצו <strong>התחל אימון</strong> כדי להפעיל שעון האימון, ואז הגדירו סטים/חזרות/משקלים
+                            (או מרחק/זמן לקרדיו). בימים ללא אימון ניתן לסמן <strong>יום מנוחה</strong> — זה ישפיע על חישובי התזונה. ⏱️🏁
+                          </li>
+                        </ol>
+                      </section>
+                
+                      {/* Tone / privacy */}
+                      <section className="grid gap-2">
+                        <h2 className="text-xl font-semibold">פשטות ופרטיות 🔒</h2>
+                        <p className="text-sm sm:text-base text-gray-700 dark:text-gray-300">
+                          הנתונים שלך שייכים לך. אנחנו שומרים על חוויה נקייה ומהירה, כך שיהיה לך קל לעקוב, לשפר ולהתמיד.
+                        </p>
+                      </section>
+                
+                      {/* CTAs */}
+                      <div className="flex flex-col sm:flex-row flex-wrap gap-3 pt-2">
+                        <Link
+                          href="/workouts/start"
+                          className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 bg-foreground text-background hover:opacity-90"
+                        >
+                          להתחיל אימון עכשיו 🏋️‍♀️
+                        </Link>
+                        <Link
+                          href="/nutrition"
+                          className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                        >
+                          להוסיף ארוחה 🍽️
+                        </Link>
+                        <Link
+                          href="/equipment"
+                          className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                        >
+                          להגדיר מכשירים 🧰
+                        </Link>
+                        <Link
+                          href="/profile"
+                          className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                        >
+                          לעדכן פרופיל ומדידות 📏
+                        </Link>
+                      </div>
+                    </section>
+                  );
+                }
+        Folder: api
+            Folder: coach-weekly
+                File: route.ts
+                    Code:
+                    // src/app/api/coach-weekly/route.ts
+                    // Updated to use the central AI client for proper fallback handling
+                    
+                    export const runtime = 'edge';
+                    
+                    import { callGeminiWithFallback } from '@/lib/ai-client';
+                    
+                    /* =========================
+                       Types
+                       ========================= */
+                    type Totals = {
+                      calories: number;
+                      protein_g: number;
+                      carbs_g: number;
+                      fat_g: number;
+                      meals: number;
+                      workouts: number;
+                      sets: number;
+                      minutes: number;
+                      rest_days: number;
+                    };
+                    
+                    type AvgTargets = {
+                      calories?: number | null;
+                      protein_g?: number | null;
+                    };
+                    
+                    type WeightSpan = {
+                      start?: number | null;
+                      end?: number | null;
+                      delta?: number | null;
+                      bf_start?: number | null;
+                      bf_end?: number | null;
+                    };
+                    
+                    type WeeklyPayload = {
+                      locale: string;
+                      week_start: string; // ISO date
+                      week_end: string;   // ISO date
+                      goals: string[];
+                      current_week: { totals: Totals; avgTargets: AvgTargets; weight: WeightSpan };
+                      previous_week: null | { totals: Totals; avgTargets: AvgTargets; weight: WeightSpan };
+                      section_keys: string[];
+                    };
+                    
+                    type AiSections = Record<string, string | undefined>;
+                    
+                    /* =========================
+                       Helpers (type guards & utils)
+                       ========================= */
+                    function jsonResponse<T extends object>(obj: T, status = 200): Response {
+                      return new Response(JSON.stringify(obj), {
+                        status,
+                        headers: { 'Content-Type': 'application/json' },
+                      });
+                    }
+                    
+                    function isRecord(v: unknown): v is Record<string, unknown> {
+                      return typeof v === 'object' && v !== null;
+                    }
+                    
+                    function isString(v: unknown): v is string {
+                      return typeof v === 'string';
+                    }
+                    
+                    function safeParseJSON(input: string): unknown | null {
+                      try {
+                        return JSON.parse(input);
+                      } catch {
+                        const match = String(input).match(/\{[\s\S]*\}$/m);
+                        if (match) {
+                          try {
+                            return JSON.parse(match[0]);
+                          } catch {
+                            return null;
+                          }
+                        }
+                        return null;
+                      }
+                    }
+                    
+                    /* =========================
+                       Route
+                       ========================= */
+                    export async function POST(req: Request) {
+                      try {
+                        const customKey = req.headers.get('x-custom-api-key');
+                        const apiKey = customKey || process.env.GEMINI_API_KEY;
+                        if (!apiKey) return jsonResponse({ error: 'GEMINI_API_KEY is not set' }, 500);
+                    
+                        const isCustomKey = !!customKey; // Check if user provided their own key
+                    
+                        const payloadUnknown = await req.json();
+                        const payload = payloadUnknown as WeeklyPayload;
+                    
+                        if (
+                          !payload?.week_start ||
+                          !payload?.week_end ||
+                          !payload?.current_week?.totals ||
+                          !Array.isArray(payload?.section_keys)
+                        ) {
+                          return jsonResponse({ error: 'invalid payload' }, 400);
+                        }
+                    
+                        // System guidance (Hebrew): concise, JSON only
+                        const system = [
+                          'החזר JSON בלבד: { "sections": { "<key>": string, ... } }',
+                          'ה"מפתחות" חייבים להתאים ל-section_keys שנשלחו.',
+                          'שפה: עברית טבעית, תמציתית (2–4 משפטים לכל כותרת), מעודדת אך כנה.',
+                          'שלב מס׳ בודדים כשזה תורם; אל תשלשל טבלאות או רשימות ארוכות.',
+                          'השווה לשבוע קודם רק אם previous_week קיים.',
+                          'אם חסר יעד/מספר—נסח מסקנה איכותית ולא מלא מספרים מומצאים.',
+                          'אין טקסט מחוץ ל-JSON. אין ```.',
+                        ].join('\n');
+                    
+                        const dataBlock = JSON.stringify({
+                          locale: payload.locale,
+                          goals: payload.goals,
+                          week: { start: payload.week_start, end: payload.week_end },
+                          current_week: payload.current_week,
+                          previous_week: payload.previous_week,
+                          section_keys: payload.section_keys,
+                        });
+                    
+                        const prompt = `DATA:\n${dataBlock}\n\n${system}\n\nהחזר רק {"sections": {...}}.`;
+                    
+                        // Use central client with fallback logic
+                        const aiRes = await callGeminiWithFallback(apiKey, prompt, true, isCustomKey);
+                        const aiData = await aiRes.json();
+                        
+                        // Logic to parse potential variations (if lib didn't fully clean up or if structure differs)
+                        let root: Record<string, unknown> | null = null;
+                        
+                        // aiData might be the direct object or contain { result: string } if handled by legacy logic, 
+                        // but callGeminiWithFallback parses JSON when jsonMode=true.
+                        // However, if the model returned { sections: ... } or just { ... }, we need to handle it.
+                        
+                        if (isRecord(aiData)) {
+                          if (isRecord(aiData.sections)) {
+                            root = aiData.sections as Record<string, unknown>;
+                          } else {
+                            root = aiData;
+                          }
+                        }
+                    
+                        // Fallback generator (short & non-robotic) if specific keys missing
+                        const cw = payload.current_week;
+                        const fallbackShort = (k: string): string => {
+                          switch (k) {
+                            case 'nutrition_overview':
+                              return `השבוע נרשמו ${Math.round(cw.totals.meals)} ארוחות. הקצב התזונתי היה מתון, עם צריכה כוללת בסך ~${Math.round(cw.totals.calories)} קק"ל.`;
+                            case 'protein':
+                              return cw.avgTargets?.protein_g != null
+                                ? `ממוצע חלבון שבועי התקרב ל-${Math.round(cw.avgTargets.protein_g)}ג׳ ליום. המשך לשאוף ליעד.`
+                                : `צריכת החלבון הייתה יציבה — מומלץ להגדיר יעד יומי.`;
+                            case 'calories':
+                              return cw.avgTargets?.calories != null
+                                ? `הצריכה הקלורית הייתה סביב ${Math.round(cw.avgTargets.calories)} קק"ל ליום.`
+                                : `מומלץ להגדיר יעד קלורי יומי.`;
+                            case 'training':
+                              return cw.totals.workouts > 0
+                                ? `בוצעו ${cw.totals.workouts} אימונים (סה"כ ~${cw.totals.minutes} דק׳).`
+                                : `השבוע נטול אימונים; גם הליכה קלה תעזור.`;
+                            case 'measurements': {
+                              const d = cw.weight?.delta;
+                              return typeof d === 'number' && Number.isFinite(d) && d !== 0
+                                ? `שינוי משקל שבועי של ${d > 0 ? '+' : ''}${d} ק״ג.`
+                                : `לא זוהה שינוי מהותי במדדים השבוע.`;
+                            }
+                            case 'suggestions':
+                              return `שמור על מה שעובד והוסף שיפור קטן אחד לשבוע.`;
+                            default:
+                              return '';
+                          }
+                        };
+                    
+                        const sections: AiSections = {};
+                        for (const key of payload.section_keys) {
+                          const candidate = root && Object.prototype.hasOwnProperty.call(root, key) && isString(root[key] as unknown)
+                              ? (root[key] as string)
+                              : '';
+                          sections[key] = candidate || fallbackShort(key);
+                        }
+                    
+                        return jsonResponse({ sections, updatedAt: new Date().toISOString() }, 200);
+                    
+                      } catch (e: unknown) {
+                        const message = e instanceof Error ? e.message : 'unknown error';
+                        return jsonResponse({ error: message }, 500);
+                      }
+                    }
+            Folder: dietitian-ai
+                Folder: analyze
+                    File: route.ts
+                        Code:
+                        import { callGeminiWithFallback } from '@/lib/ai-client';
+                        
+                        export const runtime = 'nodejs';
+                        export const maxDuration = 60; // אפשור זמן ריצה ארוך יותר ב-Vercel
+                        
+                        export async function POST(req: Request) {
+                          try {
+                            const customKey = req.headers.get('x-custom-api-key');
+                            const apiKey = customKey || process.env.GEMINI_API_KEY;
+                            if (!apiKey) return new Response(JSON.stringify({ error: 'No API Key' }), { status: 401 });
+                        
+                            const isCustomKey = !!customKey;
+                        
+                            // קבלת הנתונים המורחבים מהקליינט
+                            const { 
+                              userProfile, 
+                              logs, // כאן יגיעו הלוגים הרלוונטיים (היום או השבוע האחרון)
+                              preferences, 
+                              weightHistory, 
+                              mode, // 'daily' | 'weekly'
+                              targets, // יעדים כלליים (ברירת מחדל)
+                              dbStatus, // נתוני ה-REAL-TIME מהטבלה user_nutrition_targets (כולל current_*)
+                              medicalInfo // מידע רפואי/תרופות
+                            } = await req.json();
+                        
+                            const genderTerm = userProfile?.gender === 'female' ? 'female' : 'male';
+                            const hebrewGender = userProfile?.gender === 'female' ? 'נקבה' : 'זכר';
+                            
+                            // שליפת שעת שינה וחישוב שעה נוכחית (IL timezone)
+                            const sleepTime = preferences?.schedule_info?.sleep || '23:00';
+                            const currentTime = new Date().toLocaleTimeString('he-IL', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' });
+                        
+                            // חישוב מדויק של גיל מתוך תאריך הלידה
+                            let ageStr = 'לא ידוע';
+                            const bDateStr = userProfile?.birth_date || userProfile?.birth_data; // תמיכה בשני השמות למקרה של טעות הקלדה ב-DB
+                            if (bDateStr) {
+                                const birthDate = new Date(bDateStr);
+                                if (!isNaN(birthDate.getTime())) {
+                                    const today = new Date();
+                                    let age = today.getFullYear() - birthDate.getFullYear();
+                                    const m = today.getMonth() - birthDate.getMonth();
+                                    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                                        age--;
+                                    }
+                                    ageStr = age.toString();
+                                }
+                            }
+                        
+                            const analysisType = mode === 'weekly' ? 'סיכום שבועי ומגמות' : 'סקירה יומית ומשוב מיידי';
+                        
+                            // בניית תצוגת סטטוס מדויקת (אם קיימת)
+                            let statusDisplay = '';
+                            if (dbStatus) {
+                                statusDisplay = `
+                                **REAL-TIME DASHBOARD STATUS (Most Accurate):**
+                                - Daily Target Calories: ${dbStatus.target_calories} (Current Eaten: ${dbStatus.current_calories})
+                                - Protein Target: ${dbStatus.target_protein_g}g (Current: ${dbStatus.current_protein_g}g)
+                                - Carbs Target: ${dbStatus.target_carbs_g}g (Current: ${dbStatus.current_carbs_g}g)
+                                - Fat Target: ${dbStatus.target_fat_g}g (Current: ${dbStatus.current_fat_g}g)
+                                - Planned Deficit: ${dbStatus.deficit_pct}%
+                                - TDEE: ${dbStatus.tdee}
+                                `;
+                            } else {
+                                statusDisplay = `**Estimated Targets (No real-time dashboard data):** ${JSON.stringify(targets)}`;
+                            }
+                        
+                            // סידור לוגים בצורה שתאפשר ל-AI לצטט
+                            const logsStr = logs?.length 
+                              ? logs.map((l: any) => `[${l.date} ${l.time || ''}] ${l.item} (${l.cals}kcal, ${l.prot}g prot)`).join('\n') 
+                              : "אין נתונים מתועדים לטווח זמן זה ביומן האכילה.";
+                        
+                            // סידור היסטוריית משקל לניתוח מגמה
+                            const weightStr = weightHistory?.length 
+                              ? weightHistory.map((w: any) => `[${new Date(w.measured_at).toLocaleDateString()}] ${w.weight_kg}kg`).join('\n')
+                              : "אין נתוני שקילה.";
+                        
+                            // בניית הפרומפט בהתאם למצב (יומי/שבועי)
+                            let specificInstructions = '';
+                            
+                            if (mode === 'daily') {
+                              specificInstructions = `
+                                **Daily Review Focus (TIME AWARENESS IS CRITICAL):**
+                                **Current Time:** ${currentTime}
+                                **User Sleeps at:** ${sleepTime}
+                                
+                                1. **Contextual Analysis:** You MUST account for the time of day.
+                                   - If it is ${currentTime} and the user sleeps at ${sleepTime}, realize the day is NOT over.
+                                   - **DO NOT PANIC** about low calories/protein if there are many hours left until sleep.
+                                   - Instead of saying "You are in a huge deficit!", say "You have X hours left and Y calories remaining to hit your goal."
+                                   - Only warn about severe deficits if it is very late (close to sleep time).
+                        
+                                2. **Compare ACTUAL vs TARGETS:** Use the "REAL-TIME DASHBOARD STATUS" section above.
+                                3. **Identify immediate gaps:** based on what is reasonable to consume in the *remaining time*.
+                                4. **Suggest ONE specific immediate fix:** for the rest of today (if time permits) or for tomorrow.
+                                5. Keep it short and motivating.
+                              `;
+                            } else { // weekly
+                              specificInstructions = `
+                                **Weekly Review Focus:**
+                                1. **Pattern Recognition:** Analyze the Food Logs (last 7 days). Identify repeated foods or habits. Are they aligned with the "REAL-TIME DASHBOARD STATUS" goals (Macros/Calories)?
+                                2. **Weight vs. Deficit:** Check the "Weight History". Compare the trend to the 'Planned Deficit' in the Dashboard data. 
+                                    - IF weight dropped & deficit matches -> Praise.
+                                    - IF weight stalled but deficit was hit -> Explain water retention/plateau.
+                                    - IF weight up & deficit missed -> Gently explain the correlation using the food logs as evidence.
+                                3. **Vitamins & Micronutrients Deep Dive:** Thoroughly analyze the food logs for vitamins and minerals. Explicitly state which vitamins/minerals they are consuming adequately (based on their food choices) and which ones are likely missing or deficient.
+                                4. **Age & Gender Context:** Tailor your insights specifically for a ${ageStr}-year-old ${genderTerm}. Explain how their age and gender affect their nutritional needs (e.g., iron, calcium, metabolism changes) and evaluate if their current diet supports this.
+                                5. **Medication/Supplements:** Consider this info: "${medicalInfo || 'None'}". If relevant, explain interaction with their diet.
+                              `;
+                            }
+                        
+                            const prompt = `
+                              You are an expert clinical dietitian AI. You are reviewing a client's data.
+                              **Mode:** ${analysisType}
+                              
+                              **Client Profile:**
+                              - Gender: ${genderTerm} (Address user as ${hebrewGender}).
+                              - Age: ${ageStr}
+                              - Activity: ${userProfile?.activityLevel || 'Unknown'}
+                              - Medical/Meds: ${medicalInfo || 'None'}
+                              
+                              ${statusDisplay}
+                              
+                              **Data Source - Weight History (Analyze the trend):**
+                              ${weightStr}
+                              
+                              **Data Source - Food Logs (Focus of this review):**
+                              ${logsStr}
+                              
+                              **User Preferences:**
+                              ${JSON.stringify(preferences)}
+                        
+                              **Your Instructions:**
+                              ${specificInstructions}
+                        
+                              **MANDATORY REQUIREMENTS:**
+                              1. **Cite Evidence:** You MUST quote specific items/dates from 'Food Logs' when giving feedback. Example: "ביום שלישי אכלת X...".
+                              2. **Be Concise:** Do not write long generic intros. Go straight to the point.
+                              3. **Simple Language:** Explain complex things simply.
+                              4. **Data Accuracy:** When referring to targets or deficits, ONLY use the values from "REAL-TIME DASHBOARD STATUS".
+                              
+                              **Output Structure (Hebrew HTML only):**
+                              
+                              ${mode === 'daily' ? `
+                                <h3>📅 סקירה יומית (${new Date().toLocaleDateString('he-IL')}) - שעה ${currentTime}</h3>
+                                <p>[Analysis of today's performance vs targets, CONSIDERING THE TIME LEFT]</p>
+                                
+                                <h3>🍽️ פידבק על הארוחות</h3>
+                                <p>[Specific comments on what was eaten, citing specific foods]</p>
+                                
+                                <h3>💡 המלצה להמשך היום / למחר</h3>
+                                <p>[One actionable tip based on remaining time]</p>
+                              ` : `
+                                <h3>📊 סיכום שבוע ומגמות</h3>
+                                <p>[Analysis of the last 7 days consistency and adherence to targets]</p>
+                                
+                                <h3>⚖️ ניתוח משקל וגרעון</h3>
+                                <p>[Deep dive into weight changes vs what they actually ate. Did the deficit work?]</p>
+                                
+                                <h3>🧬 צריכת ויטמינים ומינרלים</h3>
+                                <p>[Detailed explanation of which vitamins are well-consumed and what is missing based on the food logs]</p>
+                                
+                                <h3>👤 התאמה אישית (${hebrewGender}, גיל ${ageStr})</h3>
+                                <p>[Specific insights, risks, and recommendations tailored to the user's age and gender]</p>
+                                
+                                <h3>🏆 סיכום והמשך</h3>
+                                <p>[Actionable plan for next week, including supplement/medication advice if relevant]</p>
+                              `}
+                            `;
+                        
+                            return await callGeminiWithFallback(apiKey, prompt, false, isCustomKey);
+                        
+                          } catch (error: any) {
+                            return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+                          }
+                        }
+                Folder: generate-plan
+                    File: route.ts
+                        Code:
+                        import { callGeminiWithFallback } from '@/lib/ai-client';
+                        
+                        export const runtime = 'nodejs';
+                        
+                        export async function POST(req: Request) {
+                          try {
+                            const customKey = req.headers.get('x-custom-api-key');
+                            const apiKey = customKey || process.env.GEMINI_API_KEY;
+                            if (!apiKey) return new Response(JSON.stringify({ error: 'No API Key' }), { status: 401 });
+                        
+                            const isCustomKey = !!customKey;
+                        
+                            const { userProfile, preferences, favorites, logs, targets, currentDayName } = await req.json();
+                        
+                            const wakeTime = preferences?.schedule_info?.wake_up || '07:00';
+                            const sleepTime = preferences?.schedule_info?.sleep || '23:00';
+                            const cookingStyle = preferences?.cooking_preference === 'quick' ? 'Quick & Easy (max 15 min)' : 'Chef/Invested';
+                            
+                            // שליפת הסקירה השבועית מתוך ההעדפות
+                            const weeklyReviewHtml = preferences?.last_weekly_analysis_html || 'No recent weekly review available.';
+                            
+                            // עיבוד ההיסטוריה לזיהוי דפוסים (למשל: "אוכל בבוקר בדרך כלל ביצים")
+                            // לוקחים מדגם מייצג מהלוגים
+                            const habitsStr = logs?.slice(0, 40).map((l: any) => `${l.item}`).join(', ') || "No history available";
+                        
+                            // המרת מועדפים לטקסט
+                            const favStr = favorites?.map((f: any) => f.meal_name).join(', ') || "None";
+                        
+                            const prompt = `
+                              You are an expert clinical dietitian building a highly personalized, REALISTIC, and NUTRITIONALLY ACCURATE weekly meal plan.
+                              
+                              **Context:**
+                              - **Current Day:** ${currentDayName} (Start the plan from THIS day).
+                              - **User's Eating Habits (Last Month):** ${habitsStr}. 
+                                *Analyze this!* If the user consistently eats specific foods (e.g., cottage cheese/eggs for breakfast), KEEP THEM in the plan unless they contradict the goals. Do not disrupt their routine unnecessarily.
+                              
+                              - **Dietitian's Latest Weekly Review (CRITICAL):**
+                                ${weeklyReviewHtml}
+                                *INSTRUCTIONS:* Read this review. Identify any mentioned deficiencies (e.g., lack of greens, missing vitamins, iron, etc.) or recommendations. You MUST incorporate specific foods into this meal plan to address these exact deficiencies.
+                              
+                              - **Nutritional Targets (Daily):**
+                                - Calories: ~${targets.calories} kcal
+                                - Protein: ~${targets.protein} g
+                                - Carbs: ~${targets.carbs} g
+                                - Fat: ~${targets.fat} g
+                              
+                              - **Constraints:**
+                                - Wake Up: ${wakeTime} | Sleep: ${sleepTime}.
+                                - Diet Type: ${JSON.stringify(preferences?.dietary_preferences || [])}
+                                - Cooking Style: ${cookingStyle}
+                                - Favorites: ${favStr}
+                                - Goals: ${JSON.stringify(userProfile?.goals)}
+                        
+                              **Task:**
+                              Create a 3-day meal plan starting from ${currentDayName}.
+                              
+                              **Strategy & STRICT RULES:**
+                              1. **Base:** Use the user's existing habits (from logs) as the skeleton.
+                              2. **Optimize & Heal:** Add/Swap items to meet the Macros gaps AND to address the specific vitamin/mineral deficiencies highlighted in the "Weekly Review" above.
+                              3. **Timing:** Schedule meals realistically between ${wakeTime} and ${sleepTime}.
+                              4. **MACRO ACCURACY (SUPER CRITICAL):** Calculate macronutrients exactly like a clinical dietitian using standard food databases. Do NOT inflate numbers to magically meet targets. Example: 2 slices of white bread + 2 eggs + 1 slice of cheese is roughly 25g protein, NOT 35g-40g. If the meal falls short of the target, you MUST explicitly add a high-protein ingredient to the meal description (e.g., 'added 150g greek yogurt', 'added 100g chicken breast') to justify the numbers.
+                              
+                              **Output Format (JSON):**
+                              {
+                                "days": [
+                                  {
+                                    "day_title": "יום רביעי" (Dynamic based on start day),
+                                    "daily_totals": { "calories": 1800, "protein": 140, "carbs": 150, "fat": 60 },
+                                    "daily_reasoning": "Hebrew explanation: 'Saw you usually eat X, added Y to boost protein and included Z (like Spinach) to address the iron deficiency mentioned in your weekly review...'",
+                                    "meals": [
+                                      { "type": "בוקר", "time": "HH:MM", "name": "...", "calories": 400, "protein": 25, "desc": "Must include specific quantities that physically add up to the macros. e.g., 2 eggs, 1 slice cheese, 150g greek yogurt." },
+                                      ...
+                                    ]
+                                  }
+                                ],
+                                "summary": "Short Hebrew summary explaining the overall strategy, how it hits targets, and how it fixes the issues found in the weekly review."
+                              }
+                            `;
+                        
+                            return await callGeminiWithFallback(apiKey, prompt, true, isCustomKey);
+                        
+                          } catch (error: any) {
+                            return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+                          }
+                        }
+                Folder: recipe
+                    File: route.ts
+                        Code:
+                        import { callGeminiWithFallback } from '@/lib/ai-client';
+                        
+                        export const runtime = 'nodejs';
+                        
+                        export async function POST(req: Request) {
+                          try {
+                            const customKey = req.headers.get('x-custom-api-key');
+                            const apiKey = customKey || process.env.GEMINI_API_KEY;
+                            if (!apiKey) return new Response(JSON.stringify({ error: 'No API Key' }), { status: 401 });
+                        
+                            const isCustomKey = !!customKey;
+                        
+                            // הוספנו תמיכה לקבלת התיאור עם הכמויות המדויקות (mealDesc)
+                            const { mealName, mealDesc, preferences } = await req.json();
+                        
+                            const prompt = `
+                              Create a detailed cooking recipe for: "${mealName}".
+                              
+                              **Context & MANDATORY QUANTITIES:**
+                              - **Meal Description & Weights:** ${mealDesc || 'Not provided, assume a standard single serving'}
+                              
+                              **CRITICAL RULES:**
+                              1. **SINGLE SERVING ONLY:** This recipe is for exactly 1 person.
+                              2. **RESPECT THE WEIGHTS:** You MUST strictly adhere to the quantities provided in the "Meal Description & Weights" above. If it says 150g of chicken, write exactly 150g in the ingredients. DO NOT multiply or bulk up the recipe to 500g!
+                              
+                              **User Preferences:**
+                              - Diet: ${JSON.stringify(preferences?.dietary_preferences || [])}
+                              - Style: ${preferences?.cooking_preference}
+                              
+                              **Output Format (JSON):**
+                              {
+                                "ingredients": ["150g chicken breast", "1 tsp olive oil", "item 3"],
+                                "instructions": ["step 1", "step 2"],
+                                "prep_time": "15 min",
+                                "tips": "Chef tip for making it tasty"
+                              }
+                              Language: Hebrew only.
+                            `;
+                        
+                            return await callGeminiWithFallback(apiKey, prompt, true, isCustomKey);
+                        
+                          } catch (error: any) {
+                            return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+                          }
+                        }
+                Folder: recommend
+                    File: route.ts
+                        Code:
+                        // src/app/api/dietitian-ai/recommend/route.ts
+                        
+                        import { callGeminiWithFallback } from '@/lib/ai-client';
+                        
+                        export const runtime = 'nodejs';
+                        
+                        export async function POST(req: Request) {
+                          try {
+                            const customKey = req.headers.get('x-custom-api-key');
+                            const apiKey = customKey || process.env.GEMINI_API_KEY;
+                            if (!apiKey) return new Response(JSON.stringify({ error: 'No API Key' }), { status: 401 });
+                        
+                            const isCustomKey = !!customKey;
+                        
+                            const { userProfile, preferences, currentContext, favorites, history } = await req.json();
+                        
+                            const hebrewGender = userProfile?.gender === 'female' ? 'נקבה' : 'זכר';
+                            const favStr = favorites?.map((f: any) => f.meal_name).join(', ') || "None";
+                            
+                            // קריאת הדוח השבועי גם לטובת המלצות בזמן אמת
+                            const weeklyReviewHtml = preferences?.last_weekly_analysis_html || 'No recent weekly review available.';
+                        
+                            // בניית היסטוריית השיחה
+                            const conversationHistory = history?.map((msg: any) => 
+                                `${msg.role === 'user' ? 'User' : 'Dietitian'}: ${msg.content}`
+                            ).join('\n') || 'No previous conversation.';
+                        
+                            const prompt = `
+                              You are a friendly, professional real-time clinical dietitian in a chat.
+                              
+                              **User Context:**
+                              - Gender: ${hebrewGender} (Address strictly as ${hebrewGender}).
+                              - Current Time: ${currentContext?.time}
+                              - Eaten Today: ${currentContext?.eatenCalories} kcal, ${currentContext?.eatenProtein}g protein.
+                              - Target: ${currentContext?.targetCalories} kcal, ${currentContext?.targetProtein}g protein.
+                              - Favorites: ${favStr}
+                              - Preferences: ${preferences?.cooking_preference}, ${JSON.stringify(preferences?.dietary_preferences)}
+                              
+                              **Dietitian's Weekly Review (CRITICAL):**
+                              ${weeklyReviewHtml}
+                              
+                              **Conversation History:**
+                              ${conversationHistory}
+                              
+                              **Goal:**
+                              Help the user decide what to eat RIGHT NOW.
+                              
+                              **Process & Rules:**
+                              1. **Analysis:** First, analyze the user's habits, time of day, and remaining macros. Check the Weekly Review for deficiencies (e.g., "missing greens").
+                              2. **Conversation:** Do NOT immediately give a final recipe if this is the start of the conversation. First, suggest a direction based on their habits (e.g., "Hi! I see you need more protein. How about something with eggs or tuna? Do you have that at home?").
+                              3. **Inventory Check:** ASK if they have the main ingredients before finalizing.
+                              4. **Portion Control (EXTREMELY IMPORTANT):** - When you DO recommend a meal, you MUST calculate for a **SINGLE SERVING (1 Person)**.
+                                 - Do NOT use raw package sizes (e.g., "500g meat" is WRONG for a single meal).
+                                 - Examples of correct single servings:
+                                   - "Blintzes with meat": 2 units (approx 100g total) + 50g meat filling. Total ~150g. NOT 500g.
+                                   - "Schnitzel": 1 unit (~150g chicken breast).
+                                   - "Pasta": 100g cooked pasta + 100g sauce.
+                              5. **Finalize:** ONLY when the user agrees or asks for the recipe/final plan, output the "recommendation" type. Otherwise, use "chat" type.
+                        
+                              **Output Format (JSON Only):**
+                              
+                              If chatting/asking questions:
+                              {
+                                "type": "chat",
+                                "message": "Hebrew text response here..."
+                              }
+                        
+                              If finalizing a specific meal recommendation:
+                              {
+                                "type": "recommendation",
+                                "message": "Here is the summary for your meal:",
+                                "data": {
+                                    "meal_name": "...",
+                                    "reasoning": "Hebrew explanation why this fits NOW.",
+                                    "preparation_time": "10 min",
+                                    "macros": { "calories": 300, "protein": 25, "carbs": 10, "fat": 15 },
+                                    "recipe_outline": "Brief instructions including EXACT weights for a single serving (e.g., 150g chicken)"
+                                }
+                              }
+                            `;
+                        
+                            return await callGeminiWithFallback(apiKey, prompt, true, isCustomKey);
+                        
+                          } catch (error: any) {
+                            return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+                          }
+                        }
+                    File: scriptsInfo.html
+                        Code:
+                        <!DOCTYPE html>
+                        <html lang="he" dir="rtl">
+                        <head>
+                            <meta charset="UTF-8">
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                            <title>תיעוד מבנה פרויקט - דיאטנית AI</title>
+                            <style>
+                                :root {
+                                    --primary-color: #2563eb; /* כחול נעים */
+                                    --secondary-color: #475569; /* אפור כהה */
+                                    --bg-color: #f8fafc; /* רקע בהיר מאוד */
+                                    --card-bg: #ffffff;
+                                    --accent-green: #10b981;
+                                    --accent-purple: #8b5cf6;
+                                    --accent-orange: #f59e0b;
+                                    --code-bg: #f1f5f9;
+                                    --border-radius: 12px;
+                                }
+                        
+                                body {
+                                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                                    background-color: var(--bg-color);
+                                    color: var(--secondary-color);
+                                    line-height: 1.6;
+                                    margin: 0;
+                                    padding: 20px;
+                                }
+                        
+                                .container {
+                                    max-width: 900px;
+                                    margin: 0 auto;
+                                }
+                        
+                                header {
+                                    text-align: center;
+                                    margin-bottom: 40px;
+                                    padding: 20px 0;
+                                    border-bottom: 1px solid #e2e8f0;
+                                }
+                        
+                                h1 {
+                                    color: #1e293b;
+                                    margin: 0;
+                                    font-size: 2rem;
+                                    font-weight: 700;
+                                }
+                        
+                                h2 {
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 10px;
+                                    color: #334155;
+                                    margin-top: 40px;
+                                    margin-bottom: 20px;
+                                    font-size: 1.5rem;
+                                }
+                        
+                                .section-icon {
+                                    font-size: 1.5rem;
+                                }
+                        
+                                /* Card Styling */
+                                .card {
+                                    background: var(--card-bg);
+                                    border-radius: var(--border-radius);
+                                    padding: 24px;
+                                    margin-bottom: 20px;
+                                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+                                    border: 1px solid #e2e8f0;
+                                    transition: transform 0.2s, box-shadow 0.2s;
+                                    position: relative;
+                                    overflow: hidden;
+                                }
+                        
+                                .card:hover {
+                                    transform: translateY(-2px);
+                                    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+                                }
+                        
+                                /* Color Coding Borders */
+                                .backend-card { border-right: 5px solid var(--accent-purple); }
+                                .infra-card { border-right: 5px solid var(--secondary-color); }
+                                .frontend-card { border-right: 5px solid var(--accent-orange); }
+                        
+                                .file-path {
+                                    display: inline-block;
+                                    background-color: var(--code-bg);
+                                    color: #0f172a;
+                                    font-family: 'Courier New', Courier, monospace;
+                                    padding: 6px 12px;
+                                    border-radius: 6px;
+                                    font-size: 0.95rem;
+                                    font-weight: 600;
+                                    margin-bottom: 16px;
+                                    direction: ltr; /* נתיבים תמיד משמאל לימין */
+                                }
+                        
+                                .description, .edit-when {
+                                    margin-bottom: 12px;
+                                }
+                        
+                                .label {
+                                    font-weight: 700;
+                                    color: #1e293b;
+                                    display: inline-block;
+                                    margin-left: 5px;
+                                }
+                        
+                                .edit-when {
+                                    background-color: #fffbeb; /* צהבהב עדין להערות */
+                                    padding: 12px;
+                                    border-radius: 8px;
+                                    font-size: 0.95rem;
+                                    border-right: 3px solid var(--accent-orange);
+                                    color: #78350f;
+                                }
+                        
+                                @media (max-width: 600px) {
+                                    body { padding: 10px; }
+                                    .card { padding: 16px; }
+                                    h1 { font-size: 1.5rem; }
+                                }
+                            </style>
+                        </head>
+                        <body>
+                        
+                        <div class="container">
+                            <header>
+                                <h1>מבנה פרויקט הדיאטנית</h1>
+                                <p>תיעוד קבצים, נתיבים ותחומי אחריות</p>
+                            </header>
+                        
+                            <section>
+                                <h2><span class="section-icon">🧠</span> מוח ולוגיקה (Backend APIs)</h2>
+                        
+                                <div class="card backend-card">
+                                    <div class="file-path">src/app/api/dietitian-ai/analyze/route.ts</div>
+                                    <div class="description">
+                                        <span class="label">מה זה עושה:</span>
+                                        אחראי על פיצ'ר "סקירת מצב". הוא מקבל את יומן האכילה, המשקל והפרופיל, ומחזיר דוח מילולי (HTML) עם תובנות.
+                                    </div>
+                                    <div class="edit-when">
+                                        <span class="label">מתי לערוך:</span>
+                                        כשתרצה לשנות את הניתוח שהדיאטנית נותנת (למשל: לבקש ממנה להיות קשוחה יותר, להתייחס לנתונים נוספים כמו אחוזי שומן, או לשנות את מבנה הדוח).
+                                    </div>
+                                </div>
+                        
+                                <div class="card backend-card">
+                                    <div class="file-path">src/app/api/dietitian-ai/generate-plan/route.ts</div>
+                                    <div class="description">
+                                        <span class="label">מה זה עושה:</span>
+                                        אחראי על פיצ'ר "תפריט מותאם אישית". יוצר תוכנית שבועית (או ל-3 ימים) לפי שעות השינה/קימה והעדפות.
+                                    </div>
+                                    <div class="edit-when">
+                                        <span class="label">מתי לערוך:</span>
+                                        כשתרצה לשנות את הלוגיקה של בניית התפריט (למשל: להוסיף עוד ארוחות ביניים, לשנות את חלוקת הקלוריות בין הארוחות, או להכריח אותה לגוון יותר).
+                                    </div>
+                                </div>
+                        
+                                <div class="card backend-card">
+                                    <div class="file-path">src/app/api/dietitian-ai/recommend/route.ts</div>
+                                    <div class="description">
+                                        <span class="label">מה זה עושה:</span>
+                                        אחראי על פיצ'ר "מה לאכול עכשיו?". בודק מה השעה, מה חסר למשתמש היום, וממליץ על מנה אחת ספציפית.
+                                    </div>
+                                    <div class="edit-when">
+                                        <span class="label">מתי לערוך:</span>
+                                        כשתרצה לשנות את ההיגיון של ההמלצה המיידית (למשל: לתת עדיפות למנות מהירות בלילה, או להציע מנות "מושחתות" בסופ"ש).
+                                    </div>
+                                </div>
+                        
+                                <div class="card backend-card">
+                                    <div class="file-path">src/app/api/dietitian-ai/recipe/route.ts</div>
+                                    <div class="description">
+                                        <span class="label">מה זה עושה:</span>
+                                        אחראי על כפתור "מתכון". מייצר הוראות הכנה ומצרכים למנה ספציפית.
+                                    </div>
+                                    <div class="edit-when">
+                                        <span class="label">מתי לערוך:</span>
+                                        אם תרצה לשנות את פורמט המתכון (למשל: להוסיף זמני הכנה מפורטים יותר, או לבקש טיפים לטבעונים).
+                                    </div>
+                                </div>
+                            </section>
+                        
+                            <section>
+                                <h2><span class="section-icon">🛠️</span> תשתית משותפת</h2>
+                                <div class="card infra-card">
+                                    <div class="file-path">src/lib/ai-client.ts</div>
+                                    <div class="description">
+                                        <span class="label">מה זה עושה:</span>
+                                        הסקריפט הטכני שמדבר עם גוגל (Gemini). הוא מנהל את ה-Fallback (מעבר למודל פשוט אם החכם נכשל) ואת המפתח API.
+                                    </div>
+                                    <div class="edit-when">
+                                        <span class="label">מתי לערוך:</span>
+                                        רק אם אתה רוצה להחליף את המודלים עצמם (למשל לשדרג ל-Gemini 3 Pro כשיצא, או לשנות הגדרות טמפרטורה/יצירתיות כלליות לכולם).
+                                    </div>
+                                </div>
+                            </section>
+                        
+                            <section>
+                                <h2><span class="section-icon">🎨</span> תצוגה וממשק (Frontend)</h2>
+                                <div class="card frontend-card">
+                                    <div class="file-path">src/app/nutrition/DietitianAgent.tsx</div>
+                                    <div class="description">
+                                        <span class="label">מה זה עושה:</span>
+                                        זהו הרכיב הוויזואלי (ה"פנים" של הדיאטנית). הוא מציג את הכפתורים, הגרפים, הטקסטים והתפריטים למשתמש.
+                                    </div>
+                                    <div class="edit-when">
+                                        <span class="label">מתי לערוך:</span>
+                                        כשתרצה לשנות עיצוב, להוסיף כפתורים חדשים למסך, לשנות טקסטים שמופיעים בממשק (לא בתשובות ה-AI), או לטפל בשמירה/טעינה של נתונים מה-DB בצד הלקוח.
+                                    </div>
+                                </div>
+                            </section>
+                        
+                        </div>
+                        
+                        </body>
+                        </html>
+            Folder: heartbeat
+                File: route.ts
+                    Code:
+                    // src/app/api/heartbeat/route.ts
+                    export const runtime = 'nodejs';
+                    
+                    import { createClient } from '@supabase/supabase-js';
+                    
+                    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+                    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+                    
+                    // minimal, HEAD-only query to touch the DB without returning rows
+                    export async function GET() {
+                      try {
+                        const supabase = createClient(url, anon, { auth: { persistSession: false } });
+                    
+                        // Use a table that exists in your app (profiles). If it doesn't exist,
+                        // the request will still hit Supabase and that's enough to count as activity.
+                        const { error } = await supabase
+                          .from('profiles')
+                          .select('user_id', { count: 'exact', head: true })
+                          .limit(1);
+                    
+                        const ok = !error;
+                        return new Response(
+                          JSON.stringify({ ok, note: ok ? 'pong' : `pong (query error: ${error.message})` }),
+                          { status: 200, headers: { 'Content-Type': 'application/json' } }
+                        );
+                      } catch (e: any) {
+                        // still a Supabase-bound attempt; return 200 so cron doesn’t alert
+                        return new Response(
+                          JSON.stringify({ ok: true, note: `pong (exception: ${e?.message || 'unknown'})` }),
+                          { status: 200, headers: { 'Content-Type': 'application/json' } }
+                        );
+                      }
+                    }
+            Folder: nutrition-ai
+                File: route.ts
+                    Code:
+                    // src/app/api/nutrition-ai/route.ts
+                    export const runtime = 'edge';
+                    
+                    /* ============================ Types ============================ */
+                    type Per100 = {
+                      calories: number;
+                      protein_g: number;
+                      carbs_g: number;
+                      fat_g: number;
+                    };
+                    
+                    type AiItem = {
+                      item: string;
+                      grams: number;              // ALWAYS grams
+                      amount: string;             // "<grams> גרם" for display/back-compat
+                      per100: Per100;             // density per 100g
+                      calories: number;           // totals for 'grams'
+                      protein_g: number;
+                      carbs_g: number;
+                      fat_g: number;
+                      notes?: string;
+                    };
+                    
+                    type AiResponse = {
+                      items: AiItem[];
+                      totals: { calories: number; protein_g: number; carbs_g: number; fat_g: number };
+                      assumptions?: string[];
+                    };
+                    
+                    type GeminiInlineData = { mime_type: string; data: string }; // base64
+                    type GeminiPart = { text?: string; inline_data?: GeminiInlineData };
+                    type GeminiContent = { role?: string; parts?: GeminiPart[] };
+                    type GeminiCandidate = { content?: GeminiContent };
+                    type GeminiResponse = { candidates?: GeminiCandidate[]; [k: string]: unknown };
+                    
+                    // --- Configuration ---
+                    
+                    // מודלים ספציפיים לפיצ'ר התזונה (כולל Gemini 3 בראש)
+                    // תיקון: הסרת ה-.0 משם המודל הראשון לפי בקשת המשתמש והלוגים
+                    const NUTRITION_MODELS = [
+                      'gemini-3-flash-preview', 
+                      'gemini-2.5-flash',
+                      'gemini-2.5-flash-lite',
+                      'gemini-2.0-flash',
+                      'gemini-2.0-flash-lite',
+                    ];
+                    
+                    const BACKUP_MODEL = 'DeepSeek-R1-Distill-Llama-70B';
+                    const SAMBANOVA_BASE_URL = 'https://api.sambanova.ai/v1/chat/completions';
+                    
+                    const ALLOWED_IMAGE_MIME = new Set([
+                      'image/jpeg',
+                      'image/png',
+                      'image/webp',
+                      'image/heic',
+                      'image/heif',
+                    ]);
+                    const MAX_IMAGE_BYTES = 15 * 1024 * 1024; // ~15MB
+                    
+                    /* ============================ Handler ============================ */
+                    export async function POST(req: Request) {
+                      try {
+                        // 1. Check for Custom API Key in headers
+                        const customKey = req.headers.get('x-custom-api-key');
+                        
+                        // 2. Fallback to Server Environment Variable
+                        const apiKey = customKey || process.env.GEMINI_API_KEY;
+                    
+                        if (!apiKey) {
+                          return j({ error: 'No API Key provided (Server or Custom)' }, 500);
+                        }
+                    
+                        const ctype = (req.headers.get('content-type') || '').toLowerCase();
+                        const isMultipart = ctype.includes('multipart/form-data');
+                    
+                        let text = '';
+                        let imagePart: GeminiInlineData | null = null;
+                    
+                        if (isMultipart) {
+                          const form = await req.formData();
+                          const maybeFile = form.get('file');
+                          const maybeText = form.get('text');
+                    
+                          text = typeof maybeText === 'string' ? maybeText : '';
+                    
+                          if (maybeFile && typeof maybeFile === 'object' && 'arrayBuffer' in maybeFile) {
+                            const file = maybeFile as File;
+                    
+                            if (!ALLOWED_IMAGE_MIME.has(file.type)) {
+                              return j({ error: `unsupported image type: ${file.type}` }, 400);
+                            }
+                            if (file.size > MAX_IMAGE_BYTES) {
+                              return j({ error: `image too large (${(file.size / (1024 * 1024)).toFixed(1)}MB)` }, 413);
+                            }
+                    
+                            const buf = await file.arrayBuffer();
+                            const b64 = toBase64(buf);
+                            imagePart = { mime_type: file.type || 'image/jpeg', data: b64 };
+                          }
+                    
+                          if (!imagePart && !text.trim()) {
+                            return j({ error: 'missing "file" or "text"' }, 400);
+                          }
+                        } else {
+                          // JSON back-compat
+                          const payload = (await req.json().catch(() => ({}))) as unknown;
+                          text = getTextField(payload, 'text');
+                          if (!text) return j({ error: 'missing "text"' }, 400);
+                        }
+                    
+                        // === System instruction: Hebrew-only labels + granular decomposition ===
+                        const system = [
+                          'Return ONLY valid JSON with this shape:',
+                          '{',
+                          '  "items": [',
+                          '    {',
+                          '      "item": string,                   // MUST be Hebrew (he-IL), e.g., "דג אמנון אפוי", "תפוחי אדמה", "מיונז"',
+                          '      "grams": number,                  // estimated mass in grams (metric ONLY)',
+                          '      "per100": {                       // nutrition density per 100 grams',
+                          '        "calories": number,',
+                          '        "protein_g": number,',
+                          '        "carbs_g": number,',
+                          '        "fat_g": number',
+                          '      },',
+                          '      "notes": string?                  // Hebrew note about assumptions',
+                          '    }',
+                          '  ],',
+                          '  "totals": { "calories": number, "protein_g": number, "carbs_g": number, "fat_g": number }',
+                          '}',
+                          '',
+                          'STRICT RULES:',
+                          '- All text fields ("item", "notes") MUST be in Hebrew only. No English. No transliteration.',
+                          '- ALWAYS quantify each component in grams. For beverages use 1 מ״ל ≈ 1 גרם.',
+                          '- If the input or image shows a COMPOSITE dish (e.g., "סלט אוליביה", "פיצה", "שקשוקה", "טוסט", "סלט טונה"),',
+                          '  then BREAK IT INTO SEPARATE INGREDIENT ITEMS (e.g., תפוחי אדמה, מיונז, אפונה, גזר, מלפפון חמוץ, ביצים).',
+                          '- For fish/meat, prefer a specific common Hebrew species/cut (e.g., "דג אמנון", "חזה עוף", "סלמון").',
+                          '- Use realistic per-100g values for each ingredient. If unsure about a component, pick a typical Israeli recipe baseline and explain in "notes".',
+                          '- Choose reasonable grams per component so that their sum approximates the visible/mentioned portion.',
+                          '- No free text outside of the single JSON.',
+                          '',
+                          'PORTION SIZING LOGIC (CRITICAL):',
+                          '- If the user mentions a specific quantity (e.g., "500g meat"), respect it.',
+                          '- If the user DOES NOT specify a quantity (e.g., "Blintzes with meat", "Schnitzel", "Slice of cake"), YOU MUST ASSUME A STANDARD SINGLE SERVING.',
+                          '- DO NOT assume raw package sizes (e.g. 500g/1kg meat) for a single meal description.',
+                          '- Example: "Blintzes filled with meat" -> usually 2 units, approx 150-200g total weight. NOT 500g.',
+                          '- Example: "Schnitzel" -> usually 1 unit, approx 150g.',
+                          '',
+                          'Formatting:',
+                          '- Return concise Hebrew item names. Round numbers to up to 2 decimals.',
+                          '- If any ambiguity exists (e.g., סוג הדג לא ברור), write a short Hebrew note in "notes".',
+                          '',
+                          'דוגמה לקומפוזיציה (הסבר בלבד, לא להחזיר כדוגמה):',
+                          'קלט: "סלט אוליביה ודג אמנון אפוי".',
+                          'פלט: מרכיבים נפרדים כגון "תפוחי אדמה", "מיונז", "אפונה", "גזר", "מלפפון חמוץ", "ביצים",',
+                          'ועבור הדג: "דג אמנון אפוי".',
+                        ].join('\n');
+                    
+                        const userParts: GeminiPart[] = [];
+                        // Force Hebrew hint at the top to nudge locality:
+                        userParts.push({ text: 'שפה: עברית (he-IL). החזר אך ורק טקסט בעברית בתוך JSON.' });
+                        if (imagePart) userParts.push({ inline_data: imagePart });
+                        if (text && text.trim()) userParts.push({ text: text.trim() });
+                    
+                        // --- Retry Logic with Model Fallback ---
+                        let lastError: any = null;
+                        let successfulModel = '';
+                        let raw: unknown = null;
+                        let r: Response | null = null;
+                    
+                        // 1. Try Gemini Models (Specific List for Nutrition)
+                        for (let i = 0; i < NUTRITION_MODELS.length; i++) {
+                          const model = NUTRITION_MODELS[i];
+                          try {
+                            console.log(`[Nutrition AI] Attempt ${i + 1}/${NUTRITION_MODELS.length}: Trying ${model}...`);
+                            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+                            
+                            const body = {
+                              systemInstruction: { role: 'system', parts: [{ text: system }] },
+                              contents: [{ role: 'user', parts: userParts }],
+                              generationConfig: {
+                                responseMimeType: 'application/json',
+                                temperature: 0.2,
+                                topK: 40,
+                                topP: 0.95,
+                              },
+                            };
+                    
+                            r = await fetch(url, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(body),
+                            });
+                    
+                            if (!r.ok) {
+                                const errBody = await r.json().catch(() => ({}));
+                                throw new Error(`Model ${model} failed with status ${r.status}: ${JSON.stringify(errBody)}`);
+                            }
+                    
+                            raw = await r.json().catch<unknown>(() => ({}));
+                            
+                            // Validation
+                            if (!isRecord(raw) || !raw.candidates || !Array.isArray(raw.candidates) || raw.candidates.length === 0) {
+                                throw new Error(`Model ${model} returned empty/invalid structure.`);
+                            }
+                    
+                            const textOut = extractGeminiText(raw);
+                            if (!safeParseJson(textOut)) throw new Error(`Model ${model} invalid JSON`);
+                    
+                            // Success
+                            successfulModel = model;
+                            console.log(`[Nutrition AI Success] Model ${model} worked.`);
+                            break; 
+                    
+                          } catch (err: any) {
+                            console.warn(`[Nutrition AI Fail] Attempt with ${model} failed: ${err.message}`);
+                            lastError = err;
+                          }
+                        }
+                    
+                        // 2. Failover to SambaNova (DeepSeek)
+                        // Only if user has custom key (as requested) AND all Gemini models failed.
+                        if (!successfulModel) {
+                          const isUserCustomKey = apiKey !== process.env.GEMINI_API_KEY;
+                          
+                          if (isUserCustomKey) {
+                            console.log(`[Nutrition AI Critical] All Gemini models failed. Attempting Backup: ${BACKUP_MODEL} (Text Only)...`);
+                            
+                            try {
+                              const sambaKey = process.env.SAMBANOVA_API_KEY;
+                              if (!sambaKey) throw new Error('SAMBANOVA_API_KEY missing in server env');
+                    
+                              // If request was ONLY image, we can't really do much with a text model unless text is present
+                              if (!text.trim() && imagePart) {
+                                 throw new Error('Backup model (DeepSeek) cannot process images, and no text description was provided.');
+                              }
+                    
+                              const sambaResp = await callSambaNova(sambaKey, system, text.trim() || "Analyze the nutrition of this meal");
+                              const data = await sambaResp.json();
+                              // Mock structure to match Gemini parsing below
+                              raw = { candidates: [{ content: { parts: [{ text: data.choices?.[0]?.message?.content }] } }] };
+                              
+                              successfulModel = `${BACKUP_MODEL} (Backup)`;
+                              console.log(`[Nutrition AI Backup Success] ${BACKUP_MODEL} saved the day!`);
+                    
+                            } catch (sambaErr: any) {
+                              console.error(`[Nutrition AI Backup Fail] ${sambaErr.message}`);
+                              lastError = sambaErr;
+                            }
+                          } else {
+                              console.log(`[Nutrition AI Backup Skipped] User is using system key, no backup provided.`);
+                          }
+                        }
+                    
+                        if (!successfulModel || !raw) {
+                           return j({ 
+                             error: 'All AI models failed', 
+                             detail: lastError instanceof Error ? lastError.message : String(lastError) 
+                           }, 502);
+                        }
+                    
+                        const textOut = extractGeminiText(raw);
+                        const parsedUnknown = safeParseJson(textOut);
+                        
+                        if (!parsedUnknown) {
+                            return j({ error: 'model returned empty or invalid JSON', raw: textOut, model: successfulModel }, 502);
+                        }
+                    
+                        if (!isRecord(parsedUnknown)) {
+                          return j({ error: 'model returned unexpected format', raw: textOut, full: raw, model: successfulModel }, 502);
+                        }
+                    
+                        // tolerate "meals" → "items"
+                        const rawItems =
+                          (Array.isArray((parsedUnknown as any).items) ? (parsedUnknown as any).items : undefined) ??
+                          (Array.isArray((parsedUnknown as any).meals) ? (parsedUnknown as any).meals : undefined);
+                    
+                        if (!Array.isArray(rawItems)) {
+                          return j({ error: 'model returned unexpected format (no items array)', raw: textOut, full: raw, model: successfulModel }, 502);
+                        }
+                    
+                        // === Normalize items: ensure grams & per100; compute totals ===
+                        const items: AiItem[] = rawItems.map((it) => coerceItem(it));
+                    
+                        const totals = {
+                          calories: round2(items.reduce((s, i) => s + i.calories, 0)),
+                          protein_g: round2(items.reduce((s, i) => s + i.protein_g, 0)),
+                          carbs_g: round2(items.reduce((s, i) => s + i.carbs_g, 0)),
+                          fat_g: round2(items.reduce((s, i) => s + i.fat_g, 0)),
+                        };
+                    
+                        const out: AiResponse = { items, totals };
+                        
+                        const finalRes = j(out, 200);
+                        finalRes.headers.set('x-model-used', successfulModel);
+                        return finalRes;
+                    
+                      } catch (e) {
+                        const msg = (e as { message?: string })?.message || 'unknown error';
+                        return j({ error: msg }, 500);
+                      }
+                    }
+                    
+                    /* ============================ Helpers ============================ */
+                    
+                    function j(obj: unknown, status = 200) {
+                      return new Response(JSON.stringify(obj), {
+                        status,
+                        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+                      });
+                    }
+                    
+                    function isRecord(v: unknown): v is Record<string, unknown> {
+                      return typeof v === 'object' && v !== null;
+                    }
+                    
+                    function getTextField(obj: unknown, key: string): string {
+                      if (!isRecord(obj)) return '';
+                      const v = (obj as any)[key];
+                      return typeof v === 'string' ? v : '';
+                    }
+                    
+                    function toNum(n: unknown): number {
+                      const x = typeof n === 'string' ? Number(n.trim()) : typeof n === 'number' ? n : NaN;
+                      return Number.isFinite(x) ? x : 0;
+                    }
+                    
+                    function round2(n: number): number {
+                      return Math.round(n * 100) / 100;
+                    }
+                    
+                    function safeParseJson(s: unknown): unknown | null {
+                      if (typeof s !== 'string' || !s.trim()) return null;
+                      try {
+                        const clean = s.replace(/```json|```/g, '').trim();
+                        return JSON.parse(clean);
+                      } catch {
+                        // try to salvage {...} from possible extra tokens
+                        const m = s.match(/\{[\s\S]*\}$/m);
+                        if (!m) return null;
+                        try {
+                          return JSON.parse(m[0]);
+                        } catch {
+                          return null;
+                        }
+                      }
+                    }
+                    
+                    function extractGeminiText(resp: unknown): string {
+                      if (!isRecord(resp)) return '';
+                      const candidates = (resp as any).candidates;
+                      if (!Array.isArray(candidates) || candidates.length === 0) return '';
+                      const c0 = candidates[0] as GeminiCandidate;
+                      const parts = c0?.content?.parts;
+                      if (!Array.isArray(parts)) return '';
+                      for (const p of parts as any[]) {
+                        if (p && typeof p.text === 'string') return p.text;
+                      }
+                      return '';
+                    }
+                    
+                    function parseGramsAmount(amountField: unknown): number {
+                      if (typeof amountField !== 'string') return 0;
+                      const m = amountField.match(/(\d+(?:\.\d+)?)\s*(?:g|גר(?:ם|מים)?)/i);
+                      return m ? toNum(m[1]) : 0;
+                    }
+                    
+                    function coerceItem(raw: unknown): AiItem {
+                      const o = isRecord(raw) ? raw : {};
+                    
+                      // Ensure item & notes are strings, default to empty Hebrew instead of English fallbacks
+                      const itemRaw = (o as any).item;
+                      const notesRaw = (o as any).notes;
+                    
+                      const item = typeof itemRaw === 'string' ? itemRaw.trim() : '';
+                      const notes = typeof notesRaw === 'string' ? notesRaw : undefined;
+                    
+                      let grams =
+                        toNum((o as any).grams) ||
+                        toNum((o as any).g) ||
+                        toNum((o as any).amount_grams) ||
+                        parseGramsAmount(typeof (o as any).amount === 'string' ? (o as any).amount : undefined);
+                      if (!grams || grams <= 0) grams = 100;
+                    
+                      const p100Obj = isRecord((o as any).per100) ? (o as any).per100 : {};
+                      let per100: Per100 = {
+                        calories: toNum((p100Obj as any).calories ?? (o as any).calories_per_100g),
+                        protein_g: toNum((p100Obj as any).protein_g ?? (o as any).protein_g_per_100g),
+                        carbs_g: toNum((p100Obj as any).carbs_g ?? (o as any).carbs_g_per_100g),
+                        fat_g: toNum((p100Obj as any).fat_g ?? (o as any).fat_g_per_100g),
+                      };
+                    
+                      // If density missing but absolute macros exist, infer per-100g
+                      const absCal = toNum((o as any).calories);
+                      const absPro = toNum((o as any).protein_g);
+                      const absCar = toNum((o as any).carbs_g);
+                      const absFat = toNum((o as any).fat_g);
+                    
+                      const p100Missing =
+                        !per100.calories && !per100.protein_g && !per100.carbs_g && !per100.fat_g;
+                    
+                      if (p100Missing && grams > 0 && (absCal || absPro || absCar || absFat)) {
+                        per100 = {
+                          calories: round2((absCal * 100) / grams),
+                          protein_g: round2((absPro * 100) / grams),
+                          carbs_g: round2((absCar * 100) / grams),
+                          fat_g: round2((absFat * 100) / grams),
+                        };
+                      }
+                    
+                      // Compute totals for current grams
+                      const calories = round2((per100.calories * grams) / 100);
+                      const protein_g = round2((per100.protein_g * grams) / 100);
+                      const carbs_g = round2((per100.carbs_g * grams) / 100);
+                      const fat_g = round2((per100.fat_g * grams) / 100);
+                    
+                      return {
+                        item,
+                        grams,
+                        amount: `${grams} גרם`,
+                        per100,
+                        calories,
+                        protein_g,
+                        carbs_g,
+                        fat_g,
+                        notes,
+                      };
+                    }
+                    
+                    function toBase64(ab: ArrayBuffer): string {
+                      let binary = '';
+                      const bytes = new Uint8Array(ab);
+                      const chunk = 0x8000;
+                      for (let i = 0; i < bytes.length; i += chunk) {
+                        binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+                      }
+                      return btoa(binary);
+                    }
+                    
+                    // Backup Call Implementation
+                    async function callSambaNova(apiKey: string, system: string, prompt: string) {
+                      const body = {
+                        model: BACKUP_MODEL,
+                        messages: [
+                          { role: "system", content: system + "\nOutput ONLY valid JSON." },
+                          { role: "user", content: prompt }
+                        ],
+                        temperature: 0.1,
+                      };
+                    
+                      const res = await fetch(SAMBANOVA_BASE_URL, {
+                        method: 'POST',
+                        headers: {
+                          'Authorization': `Bearer ${apiKey}`,
+                          'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(body)
+                      });
+                    
+                      if (!res.ok) {
+                        const err = await res.text();
+                        throw new Error(`SambaNova API Error: ${err}`);
+                      }
+                      
+                      return res;
+                    }
+            Folder: workout-ai
+                File: route.ts
+                    Code:
+                    // src/app/api/workout-ai/route.ts
+                    export const runtime = 'nodejs';
+                    
+                    import { callGeminiWithFallback } from '@/lib/ai-client';
+                    
+                    type EquipmentItem = {
+                      id: number;
+                      name: string;
+                      body_area: string;
+                    };
+                    
+                    export async function POST(req: Request) {
+                      try {
+                        const customKey = req.headers.get('x-custom-api-key');
+                        const apiKey = customKey || process.env.GEMINI_API_KEY;
+                    
+                        if (!apiKey) {
+                          return new Response(JSON.stringify({ error: 'No API Key provided' }), { status: 401 });
+                        }
+                    
+                        const { userRequest, inventory, mode, currentRoutine } = await req.json();
+                        const isCustomKey = !!customKey;
+                    
+                        // Default mode is 'generate'
+                        const isRefresh = mode === 'refresh';
+                    
+                        // --- MODE 1: REFRESH (Analyze existing routine) ---
+                        if (isRefresh) {
+                            if (!currentRoutine || !Array.isArray(currentRoutine)) {
+                                return new Response(JSON.stringify({ error: 'Missing currentRoutine for refresh mode' }), { status: 400 });
+                            }
+                    
+                            const systemPrompt = `
+                            You are an expert fitness coach AI.
+                            The user has an existing workout routine consisting of Tabs and Exercises.
+                            
+                            **User's Current Routine:**
+                            ${JSON.stringify(currentRoutine, null, 2)}
+                    
+                            **Task:**
+                            Analyze this exact routine. Do NOT change the tabs or exercises. 
+                            Your goal is to provide an updated, explained Summary of this routine. 
+                            Usually, the user just modified it manually or added/removed exercises, and wants an updated explanation of "What am I doing now?".
+                    
+                            **Formatting Rules:**
+                            - The Output must be a JSON object with a single field: "summary".
+                            - The "summary" field contains HTML (Hebrew).
+                            - Use <h3> for Tab names.
+                            - Use <ul><li> for exercises.
+                            - Add tips and recommended sets/reps for each exercise based on standard hypertrophy/strength goals.
+                            - Structure:
+                              <h3>🎯 ניתוח התוכנית המעודכנת</h3>
+                              <p>[Short analysis of the changes or current state]</p>
+                              <hr />
+                              <h3>[Tab Name] [Emoji]</h3>
+                              <ul>
+                                <li><strong>[Exercise]</strong>: [Target] <br/> 💡 <em>טיפ:</em>... <br/> 🔢 <em>המלצה:</em>...</li>
+                              </ul>
+                            
+                            **Output JSON:**
+                            { "summary": "HTML string..." }
+                            `;
+                    
+                            const response = await callGeminiWithFallback(apiKey, systemPrompt, true, isCustomKey);
+                            return response;
+                        }
+                    
+                        // --- MODE 2: GENERATE (Create new routine) ---
+                        if (!userRequest || !inventory || !Array.isArray(inventory)) {
+                          return new Response(JSON.stringify({ error: 'Missing userRequest or inventory' }), { status: 400 });
+                        }
+                    
+                        const inventoryList = (inventory as EquipmentItem[]).map(e => 
+                          `ID:${e.id}|${e.name}|${e.body_area}`
+                        ).join('\n');
+                    
+                        const systemPrompt = `
+                          You are an expert fitness coach AI creating a realistic workout routine.
+                          The user wants a workout plan based on their goal: "${userRequest}".
+                          
+                          Here is the available equipment inventory (ID|Name|BodyArea):
+                          ---
+                          ${inventoryList}
+                          ---
+                    
+                          **Task:**
+                          Create a workout plan structure by grouping equipment into Tabs.
+                          
+                          **CRITICAL RULES (READ CAREFULLY):**
+                          1. **REALISTIC VOLUME:** Humans cannot do 80 exercises. A standard workout is 45-90 minutes.
+                             - **IF** the user specified a number (e.g., "2 exercises per muscle"), **YOU MUST OBEY THAT NUMBER EXACTLY**.
+                             - **IF NOT**, Limit each tab to **6-9 exercises MAXIMUM**.
+                          
+                          2. **SELECTION, NOT COLLECTION:** Do NOT list every matching machine. Select the **BEST** effective exercises for the goal.
+                             - Avoid redundancy (e.g., don't pick 4 types of bicep curls unless it's an arm specialization day).
+                             - Ensure muscle balance based on the user's request.
+                    
+                          3. **Structure Analysis:** - "Full Body" -> Create tabs like "Full Body A", "Full Body B" or just one efficient list.
+                             - "Split" -> Create tabs like "Push", "Pull", "Legs".
+                             - "Core" -> Select only the top 3-5 core exercises.
+                    
+                          4. **Detailed Coaching (The "summary" field):**
+                             - The \`summary\` field MUST be formatted using **STRICT HTML TAGS**.
+                             - Do NOT use Markdown (like **, #, -). Use HTML tags only.
+                             
+                             **HTML Formatting Rules:**
+                             - Use <h3> for Main Headers (Goals, Tabs).
+                             - Use <strong> for Exercise Names and Labels.
+                             - Use <ul> and <li> for lists of exercises.
+                             - Use <br> for line breaks inside list items.
+                             - Use <p> for paragraphs.
+                             - Use <hr> to separate sections.
+                             
+                             **Required Summary Structure (HTML Example):**
+                             
+                             <h3>🎯 ניתוח והסבר התוכנית</h3>
+                             <p>[Short analysis of the goal and logic]</p>
+                             <hr />
+                             
+                             <h3>🏋️ [Tab Name & Emoji]</h3>
+                             <ul>
+                               <li>
+                                 <strong>[Exercise Name]</strong>: [Target Muscle]
+                                 <br/>
+                                 💡 <em>טיפ:</em> [Coach Tip]
+                                 <br/>
+                                 🔢 <em>המלצה:</em> [Sets x Reps, e.g. 3x12]
+                               </li>
+                               <!-- Repeat for all exercises in this tab -->
+                             </ul>
+                             
+                             <hr />
+                             <!-- Repeat for next tab -->
+                    
+                          5. **Output Format:**
+                          Return ONLY valid JSON matching this TypeScript interface:
+                          {
+                            "tabs": [
+                              { "name": "string (Hebrew)", "emoji": "string (1 char)", "equipment_ids": number[], "reasoning": "string (Hebrew)" }
+                            ],
+                            "summary": "string (Hebrew - The HTML formatted string described above)"
+                          }
+                          
+                          **Language:** Hebrew only for names/summaries.
+                          **Output:** JSON only. No markdown fences.
+                        `;
+                    
+                        const response = await callGeminiWithFallback(apiKey, systemPrompt, true, isCustomKey);
+                        return response;
+                    
+                      } catch (error: any) {
+                        console.error('AI Workout Plan Error:', error);
+                        return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+                      }
+                    }
+        Folder: equipment
+            File: page.tsx
+                Code:
+                // src/app/equipment/page.tsx
+                
+                // ===== Section 1 — Imports, Types & Constants =====
+                'use client';
+                
+                import { useEffect, useMemo, useState } from 'react';
+                import { useRouter } from 'next/navigation';
+                import { supabase } from '@/lib/supabaseClient';
+                
+                type EquipRow = {
+                  id: number;
+                  name_en: string | null;
+                  name_he: string | null;
+                  image_url: string | null;
+                  is_active: boolean | null;
+                
+                  // NEW DB columns
+                  body_area_he: string | null;
+                  muscles_he: string[] | null;     // jsonb holding string[]
+                  description_he: string | null;
+                };
+                
+                type CategoryKey =
+                  | 'chest'
+                  | 'back'
+                  | 'shoulders'
+                  | 'legs'
+                  | 'arms'
+                  | 'core'
+                  | 'cardio'
+                  | 'other';
+                
+                // UI filter includes "all" and "picked"
+                type FilterKey = 'all' | 'picked' | CategoryKey;
+                
+                const CATEGORIES: { key: FilterKey; label: string }[] = [
+                  { key: 'all', label: 'הכל' },
+                  { key: 'picked', label: 'הנבחרים שלי' }, // quick filter for user's picks (בטאב הנוכחי)
+                  { key: 'chest', label: 'חזה' },
+                  { key: 'back', label: 'גב' },
+                  { key: 'shoulders', label: 'כתפיים' },
+                  { key: 'legs', label: 'רגליים' },
+                  { key: 'arms', label: 'ידיים' },
+                  { key: 'core', label: 'ליבה' },
+                  { key: 'cardio', label: 'קרדיו' },
+                  { key: 'other', label: 'אחר' },
+                ];
+                
+                type ExerciseJson = {
+                  name_en: string;
+                  name_he: string;
+                  body_area_he: string;     // e.g. "חזה", "גב", "רגליים"...
+                  muscles_he: string[];
+                  description_he: string;
+                  image_url: string;
+                };
+                
+                type EquipView = {
+                  id: number;
+                  name_en: string;
+                  name_he: string;
+                  category: CategoryKey;
+                
+                  // chosen (DB preferred, then JSON, then placeholder)
+                  image_url: string;
+                  description: string;
+                
+                  // expose for display & search
+                  body_area_he: string;
+                  muscles_he: string[];
+                
+                  matchedFromJson?: {
+                    exerciseNameHe: string;
+                    bodyAreaHe: string;
+                  };
+                };
+                
+                type WorkoutTab = {
+                  id: number;
+                  name: string;
+                  emoji?: string | null;
+                  order_index: number;
+                };
+                
+                const JSON_URL = '/data/exercises.json'; // public/data/exercises.json
+                
+                const PLACEHOLDER_IMG =
+                  'data:image/svg+xml;utf8,' +
+                  encodeURIComponent(`
+                <svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
+                  <defs>
+                    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0" stop-color="#e5e7eb"/>
+                      <stop offset="1" stop-color="#d1d5db"/>
+                    </linearGradient>
+                  </defs>
+                  <rect width="640" height="480" fill="url(#g)"/>
+                  <g fill="#6b7280">
+                    <rect x="160" y="220" width="320" height="40" rx="8"/>
+                    <rect x="110" y="205" width="30" height="70" rx="6"/>
+                    <rect x="500" y="205" width="30" height="70" rx="6"/>
+                  </g>
+                </svg>
+                `.trim());
+                
+                const toText = (v: string | null | undefined) => (v ?? '').trim();
+                // ===== End Section 1 =====
+                
+                // ===== Section 2 — Component: State, Auth & Data Load =====
+                export default function EquipmentPage() {
+                  const router = useRouter();
+                  const [userId, setUserId] = useState<string | null>(null);
+                  const [loading, setLoading] = useState(true);
+                  const [saving, setSaving] = useState(false);
+                  const [error, setError] = useState<string | null>(null);
+                
+                  // Tabs
+                  const [tabs, setTabs] = useState<WorkoutTab[]>([]);
+                  const [activeTabId, setActiveTabId] = useState<number | null>(null);
+                    
+                  // DB equipment + selections (for ALL equipment list)
+                  const [equipViews, setEquipViews] = useState<EquipView[]>([]);
+                  const [selected, setSelected] = useState<Set<number>>(new Set()); // selection for CURRENT TAB
+                  const [selectedInitial, setSelectedInitial] = useState<Set<number>>(new Set());
+                  // Map to hold selections for ALL tabs (needed for AI Refresh)
+                  const [allTabsSelections, setAllTabsSelections] = useState<Record<number, Set<number>>>({});
+                
+                  // JSON exercises
+                  const [_exercisesJson, setExercisesJson] = useState<ExerciseJson[]>([]);
+                
+                  // Filters/Search
+                  const [search, setSearch] = useState('');
+                  const [activeCat, setActiveCat] = useState<FilterKey>('all');
+                
+                  // Image preview (lightbox)
+                  const [preview, setPreview] = useState<{ url: string; alt: string } | null>(null);
+                
+                  // --- AI Generator State ---
+                  const [showAiModal, setShowAiModal] = useState(false);
+                  const [aiPrompt, setAiPrompt] = useState('');
+                  const [aiLoading, setAiLoading] = useState(false);
+                  const [aiResult, setAiResult] = useState<{ summary: string; tabsCount?: number; itemsCount?: number } | null>(null);
+                  
+                  // Persisted AI Plan
+                  const [savedAiPlan, setSavedAiPlan] = useState<string | null>(null);
+                
+                  useEffect(() => {
+                    let ignore = false;
+                    const init = async () => {
+                      const { data } = await supabase.auth.getSession();
+                      const uid = data.session?.user?.id ?? null;
+                      if (!uid) {
+                        router.push('/login');
+                        return;
+                      }
+                      if (ignore) return;
+                      setUserId(uid);
+                
+                      // Load equipment master + tabs + selection of first tab + Saved AI Plan
+                      await Promise.all([
+                        loadEquipmentAndJson(uid), 
+                        ensureTabsAndLoad(uid),
+                        loadSavedAiPlan(uid)
+                      ]);
+                
+                      setLoading(false);
+                    };
+                    init();
+                
+                    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+                      if (!session?.user?.id) router.push('/login');
+                    });
+                    return () => {
+                      ignore = true;
+                      sub.subscription.unsubscribe();
+                    };
+                  }, [router]);
+                
+                  // close preview by ESC
+                  useEffect(() => {
+                    function onKey(e: KeyboardEvent) {
+                      if (e.key === 'Escape') setPreview(null);
+                    }
+                    window.addEventListener('keydown', onKey);
+                    return () => window.removeEventListener('keydown', onKey);
+                  }, []);
+                
+                  // --- Load Saved AI Plan ---
+                  async function loadSavedAiPlan(uid: string) {
+                    const { data, error } = await supabase
+                      .from('user_ai_plans')
+                      .select('summary_html')
+                      .eq('user_id', uid)
+                      .maybeSingle();
+                
+                    if (!error && data) {
+                      setSavedAiPlan(data.summary_html);
+                    }
+                  }
+                
+                  // --- Save AI Plan to DB ---
+                  async function saveAiPlanToDb(html: string) {
+                    if (!userId) return;
+                    const { error } = await supabase
+                      .from('user_ai_plans')
+                      .upsert({ user_id: userId, summary_html: html }, { onConflict: 'user_id' });
+                    
+                    if (error) {
+                      console.error('Error saving AI plan:', error);
+                    } else {
+                      setSavedAiPlan(html);
+                    }
+                  }
+                
+                  async function ensureTabsAndLoad(uid: string) {
+                    try {
+                      setError(null);
+                      const { data: tRows, error: tErr } = await supabase
+                        .from('user_workout_tabs')
+                        .select('id, name, emoji, order_index')
+                        .eq('user_id', uid)
+                        .order('order_index', { ascending: true });
+                
+                      if (tErr) throw new Error(tErr.message);
+                
+                      let curTabs: WorkoutTab[] = (tRows ?? []).map(r => ({
+                        id: r.id,
+                        name: r.name || 'כללי',
+                        emoji: r.emoji ?? null,
+                        order_index: r.order_index ?? 0,
+                      }));
+                
+                      if (curTabs.length === 0) {
+                        // create default tab
+                        const { data: inserted, error: cErr } = await supabase
+                          .from('user_workout_tabs')
+                          .insert([{ user_id: uid, name: 'כללי', emoji: '📋', order_index: 0 }])
+                          .select('id, name, emoji, order_index');
+                
+                        if (cErr) throw new Error(cErr.message);
+                        curTabs = inserted as any;
+                      }
+                
+                      setTabs(curTabs);
+                      
+                      // Load all selections for ALL tabs and GET THE MAP BACK
+                      const selectionsMap = await loadAllTabsSelections(uid, curTabs);
+                
+                      if (activeTabId === null || !curTabs.find(t => t.id === activeTabId)) {
+                        const firstId = curTabs[0].id;
+                        setActiveTabId(firstId);
+                        // Pass the fresh map explicitly because state update is async
+                        updateLocalSelectionFromMap(firstId, selectionsMap);
+                      } else {
+                        updateLocalSelectionFromMap(activeTabId, selectionsMap);
+                      }
+                      
+                    } catch (e: any) {
+                      setError(e?.message || 'שגיאה בטעינת הטאבים');
+                    }
+                  }
+                
+                  async function loadAllTabsSelections(uid: string, currentTabs: WorkoutTab[]) {
+                    // Fetch all equipment selections for this user
+                    const { data, error } = await supabase
+                      .from('user_tab_equipment')
+                      .select('tab_id, equipment_id')
+                      .eq('user_id', uid);
+                
+                    if (error) {
+                      console.error('Error loading selections:', error);
+                      return {};
+                    }
+                
+                    const map: Record<number, Set<number>> = {};
+                    // Initialize empty sets for known tabs
+                    currentTabs.forEach(t => map[t.id] = new Set());
+                    
+                    // Fill with data
+                    (data || []).forEach((r: any) => {
+                      if (!map[r.tab_id]) map[r.tab_id] = new Set();
+                      map[r.tab_id].add(r.equipment_id);
+                    });
+                
+                    setAllTabsSelections(map);
+                    return map; // Return the map so we can use it immediately
+                  }
+                
+                  function updateLocalSelectionFromMap(tabId: number, overrideMap?: Record<number, Set<number>>) {
+                    // Use the override map if provided (for immediate updates), otherwise use state
+                    const sourceMap = overrideMap || allTabsSelections;
+                    const ids = sourceMap[tabId] || new Set();
+                    setSelected(new Set(ids));
+                    setSelectedInitial(new Set(ids));
+                  }
+                
+                  async function loadTabSelection(uid: string, tabId: number) {
+                    // Legacy single load wrapper - logic moved to loadAllTabsSelections for efficiency
+                    // But we still need to refresh the map if called individually
+                    const map = await loadAllTabsSelections(uid, tabs);
+                    updateLocalSelectionFromMap(tabId, map);
+                  }
+                
+                  async function loadEquipmentAndJson(_uid: string) {
+                    try {
+                      setError(null);
+                      const { data: eqData, error: eqErr } = await supabase
+                        .from('equipment')
+                        .select('id, name_en, name_he, image_url, is_active, body_area_he, muscles_he, description_he')
+                        .order('id', { ascending: true });
+                
+                      if (eqErr) throw new Error(eqErr.message);
+                      const eqRows: EquipRow[] = (eqData ?? []).filter((r) => r.is_active !== false);
+                
+                      const res = await fetch(JSON_URL, { cache: 'no-store' });
+                      if (!res.ok) throw new Error('Failed to load exercises.json');
+                      const json = (await res.json()) as ExerciseJson[];
+                      setExercisesJson(json);
+                
+                      const mapped: EquipView[] = eqRows.map((r) => {
+                        const name_en = toText(r.name_en);
+                        const name_he = toText(r.name_he);
+                        const guessedCategory = guessCategory(name_en, name_he);
+                        const match = pickBestJsonMatch({ name_en, name_he, category: guessedCategory }, json);
+                
+                        const dbBodyArea = toText(r.body_area_he);
+                        const jsonBodyArea = toText(match?.body_area_he);
+                        const body_area_he = dbBodyArea || jsonBodyArea;
+                
+                        const category = body_area_he
+                          ? catFromBodyAreaHeb(body_area_he)
+                          : guessedCategory;
+                
+                        const dbDesc = toText(r.description_he);
+                        const desc = dbDesc || toText(match?.description_he) || genericDescription(category);
+                
+                        const dbMuscles = Array.isArray(r.muscles_he) ? (r.muscles_he as string[]) : [];
+                        const muscles = dbMuscles.length ? dbMuscles : (match?.muscles_he ?? []);
+                        const img = r.image_url || match?.image_url || PLACEHOLDER_IMG;
+                
+                        return {
+                          id: r.id,
+                          name_en: name_en || name_he || 'Unknown',
+                          name_he: name_he || name_en || 'לא ידוע',
+                          category,
+                          image_url: img,
+                          description: desc,
+                          body_area_he: body_area_he || categoryHeb(category),
+                          muscles_he: muscles,
+                          matchedFromJson: match
+                            ? { exerciseNameHe: match.name_he, bodyAreaHe: match.body_area_he }
+                            : undefined,
+                        };
+                      });
+                
+                      setEquipViews(mapped);
+                      return true;
+                    } catch (e: any) {
+                      setError(e?.message || 'שגיאה בטעינת המכשירים/התרגילים');
+                      setEquipViews([]);
+                      setExercisesJson([]);
+                      return false;
+                    }
+                  }
+                
+                  // ---- Tabs: CRUD ----
+                  async function createTab() {
+                    if (!userId) return;
+                    const base = prompt('שם הטאב החדש:', 'אימון חדש');
+                    if (!base) return;
+                    const emoji = prompt('אפשר להוסיף אימוג׳י (לא חובה):', '💪') || null;
+                    const order_index = (tabs[tabs.length - 1]?.order_index ?? 0) + 1;
+                
+                    const { data, error } = await supabase
+                      .from('user_workout_tabs')
+                      .insert({ user_id: userId, name: base, emoji, order_index })
+                      .select('id, name, emoji, order_index')
+                      .single();
+                
+                    if (error || !data) {
+                      setError(error?.message || 'שגיאה ביצירת טאב');
+                      return;
+                    }
+                    const newTab: WorkoutTab = { id: data.id, name: data.name, emoji: data.emoji, order_index: data.order_index };
+                    const next = [...tabs, newTab].sort((a, b) => a.order_index - b.order_index);
+                    setTabs(next);
+                    // Initialize empty selection set for new tab
+                    setAllTabsSelections(prev => ({ ...prev, [newTab.id]: new Set() }));
+                    
+                    setActiveTabId(newTab.id);
+                    updateLocalSelectionFromMap(newTab.id);
+                  }
+                
+                  async function renameTab(tab: WorkoutTab) {
+                    if (!userId) return;
+                    const name = prompt('שם חדש לטאב:', tab.name) || tab.name;
+                    const emoji = prompt('שנו אימוג׳י (או רוקנו):', tab.emoji || '') || null;
+                
+                    const { error } = await supabase
+                      .from('user_workout_tabs')
+                      .update({ name, emoji })
+                      .eq('id', tab.id)
+                      .eq('user_id', userId);
+                
+                    if (error) { setError(error.message); return; }
+                
+                    setTabs((prev) => prev.map(t => t.id === tab.id ? { ...t, name, emoji } : t));
+                  }
+                
+                  async function deleteTab(tab: WorkoutTab) {
+                    if (!userId) return;
+                    if (!confirm(`למחוק את הטאב "${tab.name}"? הפעולה תמחק גם את הבחירות שלו.`)) return;
+                
+                    const { error } = await supabase.from('user_workout_tabs').delete().eq('id', tab.id).eq('user_id', userId);
+                    if (error) { setError(error.message); return; }
+                
+                    const rest = tabs.filter(t => t.id !== tab.id);
+                    setTabs(rest);
+                    
+                    // Update local map
+                    const newMap = { ...allTabsSelections };
+                    delete newMap[tab.id];
+                    setAllTabsSelections(newMap);
+                
+                    if (rest.length) {
+                      const newActive = rest[0].id;
+                      setActiveTabId(newActive);
+                      updateLocalSelectionFromMap(newActive);
+                    } else {
+                      setActiveTabId(null);
+                      setSelected(new Set());
+                      setSelectedInitial(new Set());
+                    }
+                  }
+                
+                  // ---- Selection save (per tab) ----
+                  async function saveSelection() {
+                    if (!userId || !activeTabId) return;
+                    setSaving(true);
+                    setError(null);
+                
+                    try {
+                      const toInsert = diffPlus(selected, selectedInitial);
+                      const toDelete = diffPlus(selectedInitial, selected);
+                
+                      if (toInsert.length) {
+                        const payload = toInsert.map((equipment_id) => ({
+                          user_id: userId,
+                          tab_id: activeTabId,
+                          equipment_id,
+                        }));
+                        const { error } = await supabase.from('user_tab_equipment').insert(payload);
+                        if (error) throw new Error(error.message);
+                      }
+                
+                      if (toDelete.length) {
+                        const { error } = await supabase
+                          .from('user_tab_equipment')
+                          .delete()
+                          .eq('user_id', userId)
+                          .eq('tab_id', activeTabId)
+                          .in('equipment_id', toDelete);
+                        if (error) throw new Error(error.message);
+                      }
+                
+                      setSelectedInitial(new Set(selected));
+                      // Update the global map too
+                      setAllTabsSelections(prev => ({ ...prev, [activeTabId]: new Set(selected) }));
+                
+                    } catch (e: any) {
+                      setError(e?.message || 'שגיאה בשמירת הבחירות');
+                    } finally {
+                      setSaving(false);
+                    }
+                  }
+                
+                  // ---- AI Generator Logic (New & Refresh) ----
+                  
+                  // 1. New Plan from Prompt
+                  async function handleAiPlan() {
+                    if (!userId || !aiPrompt.trim()) return;
+                    setAiLoading(true);
+                    setAiResult(null);
+                    setError(null);
+                
+                    try {
+                      const key = typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') : null;
+                      
+                      const inventory = equipViews.map(e => ({
+                        id: e.id,
+                        name: e.name_he || e.name_en,
+                        body_area: e.body_area_he
+                      }));
+                
+                      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+                      if (key) headers['x-custom-api-key'] = key;
+                
+                      const res = await fetch('/api/workout-ai', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ 
+                            mode: 'generate',
+                            userRequest: aiPrompt, 
+                            inventory 
+                        })
+                      });
+                
+                      if (!res.ok) {
+                        const err = await res.json();
+                        throw new Error(err.error || 'שגיאה ביצירת התוכנית');
+                      }
+                
+                      const data = await res.json();
+                      
+                      let totalTabs = 0;
+                      let totalItems = 0;
+                      let nextOrder = (tabs[tabs.length - 1]?.order_index ?? 0) + 1;
+                
+                      for (const t of data.tabs) {
+                        const { data: newTab, error: tabErr } = await supabase
+                          .from('user_workout_tabs')
+                          .insert({ user_id: userId, name: t.name, emoji: t.emoji, order_index: nextOrder++ })
+                          .select('id')
+                          .single();
+                        
+                        if (tabErr) throw tabErr;
+                        if (!newTab) continue;
+                
+                        totalTabs++;
+                        
+                        if (t.equipment_ids && t.equipment_ids.length > 0) {
+                          const payload = t.equipment_ids.map((eid: number) => ({
+                            user_id: userId,
+                            tab_id: newTab.id,
+                            equipment_id: eid
+                          }));
+                          
+                          const { error: linkErr } = await supabase.from('user_tab_equipment').insert(payload);
+                          if (linkErr) throw linkErr;
+                          totalItems += t.equipment_ids.length;
+                        }
+                      }
+                
+                      setAiResult({ summary: data.summary, tabsCount: totalTabs, itemsCount: totalItems });
+                      
+                      // Save the generated HTML to DB
+                      await saveAiPlanToDb(data.summary);
+                
+                      setAiPrompt('');
+                      await ensureTabsAndLoad(userId);
+                
+                    } catch (e: any) {
+                      setError(e?.message || 'שגיאה בלתי צפויה ביצירת התוכנית');
+                    } finally {
+                      setAiLoading(false);
+                    }
+                  }
+                
+                  // 2. Refresh existing Plan (Analyze current tabs)
+                  async function handleRefreshPlan() {
+                    if (!userId) return;
+                    setAiLoading(true);
+                    setAiResult(null); 
+                    setError(null);
+                
+                    try {
+                      const key = typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') : null;
+                
+                      // Construct current routine structure
+                      const currentRoutine = tabs.map(t => {
+                        const eqIds = Array.from(allTabsSelections[t.id] || []);
+                        const eqNames = eqIds.map(eid => {
+                          const eq = equipViews.find(ev => ev.id === eid);
+                          return eq ? (eq.name_he || eq.name_en) : `Unknown ID ${eid}`;
+                        });
+                        return {
+                            name: t.name,
+                            emoji: t.emoji,
+                            exercises: eqNames
+                        };
+                      });
+                
+                      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+                      if (key) headers['x-custom-api-key'] = key;
+                
+                      const res = await fetch('/api/workout-ai', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ 
+                            mode: 'refresh',
+                            currentRoutine 
+                        })
+                      });
+                
+                      if (!res.ok) {
+                        const err = await res.json();
+                        throw new Error(err.error || 'שגיאה ברענון התוכנית');
+                      }
+                
+                      const data = await res.json();
+                      
+                      // Data should contain only 'summary'
+                      setAiResult({ summary: data.summary });
+                      
+                      // Save new summary to DB
+                      await saveAiPlanToDb(data.summary);
+                
+                    } catch (e: any) {
+                      setError(e?.message || 'שגיאה בלתי צפויה ברענון התוכנית');
+                    } finally {
+                      setAiLoading(false);
+                    }
+                  }
+                
+                  if (loading) return <p className="opacity-70">טוען…</p>;
+                
+                  return (
+                    <>
+                      <EquipmentPageView
+                        // tabs
+                        tabs={tabs}
+                        activeTabId={activeTabId}
+                        setActiveTabId={async (id) => {
+                          if (id === activeTabId) return;
+                          setActiveTabId(id);
+                          // Sync current selection first if saving needed? 
+                          // (Right now we require manual save, so we just switch view)
+                          updateLocalSelectionFromMap(id);
+                        }}
+                        createTab={createTab}
+                        renameTab={renameTab}
+                        deleteTab={deleteTab}
+                        // AI
+                        openAiModal={() => {
+                            // If we have a result from THIS session, show it.
+                            // If not, but we have a SAVED plan, load that into result (for display)
+                            if (!aiResult && savedAiPlan) {
+                                setAiResult({ summary: savedAiPlan });
+                            }
+                            setShowAiModal(true);
+                        }}
+                        hasSavedPlan={!!savedAiPlan}
+                
+                        // data
+                        equipViews={equipViews}
+                        selected={selected}
+                        selectedInitial={selectedInitial}
+                        // filters/search
+                        search={search}
+                        setSearch={setSearch}
+                        activeCat={activeCat}
+                        setActiveCat={setActiveCat}
+                        // status/errors
+                        saving={saving}
+                        error={error}
+                        // actions
+                        toggle={(id) => {
+                          setSelected((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(id)) next.delete(id);
+                            else next.add(id);
+                            return next;
+                          });
+                        }}
+                        clearSelection={() => setSelected(new Set())}
+                        save={saveSelection}
+                        // preview controls
+                        openPreview={(url, alt) => setPreview({ url, alt })}
+                      />
+                
+                      {/* Image Lightbox */}
+                      <ImageLightbox
+                        open={!!preview}
+                        url={preview?.url || ''}
+                        alt={preview?.alt || ''}
+                        onClose={() => setPreview(null)}
+                      />
+                
+                      {/* AI Workout Builder Modal */}
+                      {showAiModal && (
+                        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" dir="rtl">
+                          <div className="bg-white dark:bg-neutral-900 rounded-xl shadow-xl w-full max-w-lg overflow-hidden ring-1 ring-white/10 animate-in fade-in zoom-in duration-200 flex flex-col max-h-[85vh]">
+                            <div className="p-4 border-b border-black/10 dark:border-white/10 flex justify-between items-center bg-gray-50 dark:bg-white/5 shrink-0">
+                              <h3 className="font-semibold text-lg flex items-center gap-2">
+                                <MagicIcon className="w-5 h-5 text-indigo-500" />
+                                {aiResult ? 'התוכנית שלך' : 'בניית תוכנית חכמה (AI)'}
+                              </h3>
+                              <button 
+                                onClick={() => { setShowAiModal(false); }} 
+                                className="text-2xl leading-none opacity-50 hover:opacity-100 px-2"
+                                aria-label="סגור"
+                              >
+                                ×
+                              </button>
+                            </div>
+                
+                            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+                              {!aiResult ? (
+                                // --- CREATE NEW MODE ---
+                                <>
+                                  <p className="text-sm text-gray-600 dark:text-gray-300">
+                                    תאר/י את המטרות שלך (למשל: "אני רוצה קוביות בבטן", "חיזוק פלג גוף עליון", "תוכנית לכל הגוף ב-3 ימים").
+                                    <br/>
+                                    ה-AI יסרוק את המכשירים הקיימים וייצור עבורך טאבים חדשים עם תרגילים מתאימים.
+                                  </p>
+                                  
+                                  <textarea
+                                    className="w-full h-32 p-3 rounded-lg border border-black/10 dark:border-white/20 bg-transparent focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                                    placeholder="פרט/י כאן את מטרות האימון שלך..."
+                                    value={aiPrompt}
+                                    onChange={(e) => setAiPrompt(e.target.value)}
+                                    disabled={aiLoading}
+                                  />
+                
+                                  <div className="flex justify-end">
+                                    <button
+                                      onClick={handleAiPlan}
+                                      disabled={aiLoading || !aiPrompt.trim()}
+                                      className="bg-indigo-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                    >
+                                      {aiLoading ? 'הרובוט עובד... 🤖' : 'צור תוכנית ✨'}
+                                    </button>
+                                  </div>
+                                </>
+                              ) : (
+                                // --- VIEW / REFRESH MODE ---
+                                <div className="space-y-4">
+                                  
+                                  {/* Refresh Button - Based on ACTUAL tabs/exercises */}
+                                  <div className="flex justify-end">
+                                      <button
+                                        onClick={handleRefreshPlan}
+                                        disabled={aiLoading}
+                                        className="text-xs flex items-center gap-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-300 px-3 py-1.5 rounded-full hover:bg-blue-100 dark:hover:bg-blue-900/40 transition"
+                                        title="ינתח מחדש את הטאבים והתרגילים שבחרת וייצור הסבר מעודכן"
+                                      >
+                                        <svg className={`w-3.5 h-3.5 ${aiLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                                        {aiLoading ? 'מעדכן...' : 'רענן ניתוח עפ"י השינויים שלי'}
+                                      </button>
+                                  </div>
+                
+                                  {/* Summary rendered as HTML */}
+                                  <div className="bg-gray-50 dark:bg-white/5 p-4 rounded-lg text-sm text-right space-y-2 border border-black/5 dark:border-white/5 shadow-inner">
+                                    <div 
+                                      className="
+                                        prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-white
+                                        [&_h3]:text-base [&_h3]:font-bold [&_h3]:mt-6 [&_h3]:mb-3 [&_h3]:text-indigo-600 dark:[&_h3]:text-indigo-400 [&_h3:first-child]:mt-0
+                                        [&_strong]:font-bold [&_strong]:text-indigo-700 dark:[&_strong]:text-indigo-300
+                                        [&_ul]:list-none [&_ul]:space-y-4 [&_ul]:p-0
+                                        [&_li]:bg-white dark:[&_li]:bg-white/5 [&_li]:p-3 [&_li]:rounded-md [&_li]:shadow-sm [&_li]:border [&_li]:border-black/5 dark:[&_li]:border-white/5
+                                        [&_p]:leading-relaxed
+                                        [&_hr]:my-6 [&_hr]:border-black/10 dark:[&_hr]:border-white/10
+                                      "
+                                      dangerouslySetInnerHTML={{ __html: aiResult.summary }}
+                                    />
+                                    
+                                    {(aiResult.tabsCount || 0) > 0 && (
+                                        <div className="flex gap-4 text-xs opacity-80 pt-4 border-t border-black/10 dark:border-white/10 mt-4 font-mono">
+                                        <span>📂 {aiResult.tabsCount} טאבים חדשים נוצרו</span>
+                                        </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                
+                              {error && (
+                                <div className="bg-red-50 dark:bg-red-900/20 text-red-600 p-3 rounded-lg text-sm text-center">
+                                  שגיאה: {error}
+                                </div>
+                              )}
+                            </div>
+                
+                            {/* Footer actions for modal */}
+                            {aiResult && (
+                              <div className="p-4 border-t border-black/10 dark:border-white/10 bg-gray-50 dark:bg-white/5 flex gap-3 shrink-0">
+                                <button
+                                    onClick={() => { setAiResult(null); }}
+                                    className="flex-1 bg-white dark:bg-neutral-800 border border-black/10 dark:border-white/10 text-gray-800 dark:text-white px-4 py-2.5 rounded-lg font-medium hover:bg-gray-50"
+                                >
+                                    ✨ תוכנית חדשה
+                                </button>
+                                <button
+                                  onClick={() => { setShowAiModal(false); }}
+                                  className="flex-1 bg-indigo-600 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-indigo-700"
+                                >
+                                  סגור
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                }
+                // ===== End Section 2 =====
+                
+                
+                
+                
+                // ===== Section 3 — Stateless View & Filtering =====
+                function EquipmentPageView(props: {
+                  // tabs
+                  tabs: WorkoutTab[];
+                  activeTabId: number | null;
+                  setActiveTabId: (id: number) => void | Promise<void>;
+                  createTab: () => void | Promise<void>;
+                  renameTab: (tab: WorkoutTab) => void | Promise<void>;
+                  deleteTab: (tab: WorkoutTab) => void | Promise<void>;
+                   
+                  // AI
+                  openAiModal: () => void;
+                  hasSavedPlan: boolean;
+                
+                  // equipment list + selection
+                  equipViews: EquipView[];
+                  selected: Set<number>;
+                  selectedInitial: Set<number>;
+                
+                  // search/filter
+                  search: string;
+                  setSearch: (v: string) => void;
+                  activeCat: FilterKey;
+                  setActiveCat: (v: FilterKey) => void;
+                
+                  // status
+                  saving: boolean;
+                  error: string | null;
+                
+                  // actions
+                  toggle: (id: number) => void;
+                  clearSelection: () => void;
+                  save: () => Promise<void>;
+                  openPreview: (url: string, alt: string) => void;
+                }) {
+                  const {
+                    tabs,
+                    activeTabId,
+                    setActiveTabId,
+                    createTab,
+                    renameTab,
+                    deleteTab,
+                    openAiModal,
+                    hasSavedPlan,
+                    equipViews,
+                    selected,
+                    selectedInitial,
+                    search,
+                    setSearch,
+                    activeCat,
+                    setActiveCat,
+                    saving,
+                    error,
+                    toggle,
+                    clearSelection,
+                    save,
+                    openPreview,
+                  } = props;
+                
+                  const filtered = useMemo(() => {
+                    const q = search.trim().toLowerCase();
+                    let arr = equipViews;
+                
+                    if (activeCat === 'picked') {
+                      arr = arr.filter((e) => selected.has(e.id));
+                    } else if (activeCat !== 'all') {
+                      arr = arr.filter((e) => e.category === activeCat);
+                    }
+                
+                    if (q) {
+                      arr = arr.filter((e) => {
+                        const pool = [
+                          e.name_he,
+                          e.name_en,
+                          e.description,
+                          e.body_area_he,
+                          e.muscles_he.join(' '),
+                          categoryLabel(e.category),
+                          e.matchedFromJson?.exerciseNameHe ?? '',
+                          e.matchedFromJson?.bodyAreaHe ?? '',
+                        ]
+                          .join(' ')
+                          .toLowerCase();
+                        return pool.includes(q);
+                      });
+                    }
+                    return arr;
+                  }, [equipViews, search, activeCat, selected]);
+                
+                  return (
+                    <div className="mx-auto max-w-6xl space-y-6" dir="rtl">
+                      <header className="space-y-2 flex flex-col md:flex-row md:items-end justify-between gap-4">
+                        <div>
+                          <h1 className="text-3xl font-bold tracking-tight">בחירת מכשירים</h1>
+                          <p className="text-sm text-gray-600 dark:text-gray-300">
+                            נהל/י טאבים שונים לאימונים ובחר/י לכל טאב את המכשירים שלו.
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                            {/* Show Plan Button - Only if we have a saved plan */}
+                            {hasSavedPlan && (
+                                <button
+                                onClick={openAiModal}
+                                className="inline-flex items-center gap-2 bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-gray-800 dark:text-white px-4 py-2 rounded-full font-medium shadow-sm hover:bg-gray-50 transition-all"
+                                >
+                                <span className="text-lg">📋</span>
+                                <span className="hidden sm:inline">הצג תוכנית</span>
+                                </button>
+                            )}
+                
+                            <button
+                            onClick={openAiModal}
+                            className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-4 py-2 rounded-full font-medium shadow hover:shadow-lg transition-all hover:scale-105"
+                            >
+                            <MagicIcon className="w-4 h-4" />
+                            <span>בניית תוכנית AI</span>
+                            </button>
+                        </div>
+                      </header>
+                
+                      {/* Tabs bar - Responsive Design */}
+                      <section className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background overflow-hidden">
+                        
+                        {/* Desktop View: Original Horizontal List */}
+                        <div className="hidden md:flex p-3 md:p-4 items-center justify-between gap-2 border-b border-black/10 dark:border-white/10">
+                          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                            {tabs.map((t) => {
+                              const isActive = t.id === activeTabId;
+                              return (
+                                <button
+                                  key={t.id}
+                                  onClick={() => setActiveTabId(t.id)}
+                                  className={`shrink-0 rounded-full px-3 py-1.5 text-sm border inline-flex items-center gap-2 transition
+                                    ${
+                                      isActive
+                                        ? 'bg-foreground text-background border-foreground'
+                                        : 'border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
+                                    }`}
+                                  title={t.name}
+                                >
+                                  <span className="text-base">{t.emoji || '🏷️'}</span>
+                                  <span className="font-medium">{t.name}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {activeTabId != null && (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    const tab = tabs.find((x) => x.id === activeTabId)!;
+                                    renameTab(tab);
+                                  }}
+                                  className="rounded-lg border border-black/10 dark:border-white/20 px-3 py-2 text-sm hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                                >
+                                  שנה שם
+                                </button>
+                                {tabs.length > 1 && (
+                                  <button
+                                    onClick={() => {
+                                      const tab = tabs.find((x) => x.id === activeTabId)!;
+                                      deleteTab(tab);
+                                    }}
+                                    className="rounded-lg border border-black/10 dark:border-white/20 px-3 py-2 text-sm hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                                  >
+                                    מחק
+                                  </button>
+                                )}
+                              </>
+                            )}
+                            <button
+                              onClick={createTab}
+                              className="rounded-lg px-3 py-2 text-sm bg-foreground text-background hover:opacity-90"
+                            >
+                              + חדש
+                            </button>
+                          </div>
+                        </div>
+                
+                        {/* Mobile View: Clean Dropdown & Actions */}
+                        <div className="md:hidden p-4 space-y-3 bg-gray-50/50 dark:bg-white/5">
+                             <div className="relative">
+                                <label className="text-xs font-bold opacity-50 mb-1 block px-1">בחר אימון לעריכה:</label>
+                                <div className="relative">
+                                    <select
+                                        value={activeTabId || ''}
+                                        onChange={(e) => setActiveTabId(Number(e.target.value))}
+                                        className="w-full appearance-none bg-white dark:bg-neutral-800 border border-black/10 dark:border-white/20 rounded-xl py-3 pr-4 pl-10 text-base font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    >
+                                        {tabs.map(t => (
+                                            <option key={t.id} value={t.id}>{t.emoji || '🏷️'} {t.name}</option>
+                                        ))}
+                                    </select>
+                                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center px-3 text-gray-500">
+                                        <ChevronDownIcon className="h-5 w-5" />
+                                    </div>
+                                </div>
+                             </div>
+                             
+                             <div className="grid grid-cols-3 gap-2">
+                                 <button onClick={createTab} className="col-span-1 bg-white dark:bg-white/10 border border-black/5 dark:border-white/10 py-2.5 rounded-lg text-sm font-medium shadow-sm active:scale-95 transition-transform">
+                                    + חדש
+                                 </button>
+                                 {activeTabId != null && (
+                                    <>
+                                        <button onClick={() => { const t = tabs.find((x) => x.id === activeTabId); if(t) renameTab(t); }} className="col-span-1 bg-white dark:bg-white/10 border border-black/5 dark:border-white/10 py-2.5 rounded-lg text-sm font-medium shadow-sm active:scale-95 transition-transform">
+                                           שנה שם
+                                        </button>
+                                        {tabs.length > 1 ? (
+                                            <button onClick={() => { const t = tabs.find((x) => x.id === activeTabId); if(t) deleteTab(t); }} className="col-span-1 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 py-2.5 rounded-lg text-sm font-medium shadow-sm active:scale-95 transition-transform">
+                                                מחק
+                                            </button>
+                                        ) : (
+                                            <div className="col-span-1"></div>
+                                        )}
+                                    </>
+                                 )}
+                             </div>
+                        </div>
+                      </section>
+                
+                      {/* Filter Section - Responsive */}
+                      <div className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background p-4 md:p-6 grid gap-4">
+                          <SearchField
+                            label="חיפוש מכשירים"
+                            placeholder="למשל: חזה / Chest / Row / כתפיים / בייספס…"
+                            value={search}
+                            onChange={setSearch}
+                          />
+                          
+                          {/* Desktop Categories List */}
+                          <div className="hidden md:flex gap-2 overflow-x-auto pb-1">
+                            {CATEGORIES.map((c) => {
+                              const isPicked = c.key === 'picked';
+                              const pickedCount = isPicked ? (activeTabId ? selected.size : 0) : 0;
+                
+                              return (
+                                <button
+                                  key={c.key}
+                                  onClick={() => setActiveCat(c.key)}
+                                  className={`shrink-0 rounded-full px-3 py-1.5 text-sm border inline-flex items-center gap-2
+                                    ${
+                                      activeCat === c.key
+                                        ? 'bg-foreground text-background border-foreground'
+                                        : 'border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
+                                    }`}
+                                >
+                                  <span>{c.label}</span>
+                                  {isPicked && (
+                                    <span
+                                      className={`text-xs px-1.5 py-0.5 rounded-full border ${
+                                        activeCat === c.key
+                                          ? 'border-background/50'
+                                          : 'border-black/10 dark:border-white/20'
+                                      }`}
+                                      title="כמה נבחרו בטאב הנוכחי"
+                                    >
+                                      {pickedCount}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                
+                          {/* Mobile Categories Control */}
+                          <div className="md:hidden grid grid-cols-2 gap-3">
+                             {/* Picked Toggle */}
+                             <button
+                                onClick={() => setActiveCat(activeCat === 'picked' ? 'all' : 'picked')}
+                                className={`flex flex-col items-center justify-center gap-1 rounded-xl border py-2.5 text-sm font-bold transition-all
+                                  ${activeCat === 'picked'
+                                    ? 'bg-emerald-500 text-white border-emerald-600 shadow-md ring-2 ring-emerald-200 dark:ring-emerald-900'
+                                    : 'bg-white dark:bg-neutral-800 border-black/10 dark:border-white/20 text-gray-600 dark:text-gray-300'
+                                  }`}
+                             >
+                                <div className="flex items-center gap-2">
+                                    <span>{activeCat === 'picked' ? '✅' : '○'}</span>
+                                    <span>הנבחרים שלי</span>
+                                </div>
+                                {activeTabId && selected.size > 0 && (
+                                   <span className={`text-[10px] px-2 rounded-full ${activeCat === 'picked' ? 'bg-white/20' : 'bg-black/5 dark:bg-white/10'}`}>
+                                      {selected.size} מכשירים
+                                   </span>
+                                )}
+                             </button>
+                
+                             {/* Categories Dropdown */}
+                             <div className="relative">
+                                <select
+                                   value={activeCat === 'picked' ? 'all' : activeCat}
+                                   onChange={(e) => setActiveCat(e.target.value as FilterKey)}
+                                   className={`w-full h-full appearance-none border rounded-xl px-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 text-right
+                                       ${activeCat !== 'picked' 
+                                          ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-300 dark:border-indigo-800' 
+                                          : 'bg-white text-gray-500 border-black/10 dark:bg-neutral-800 dark:border-white/20 dark:text-gray-400'}
+                                   `}
+                                >
+                                   <option value="all">כל הקטגוריות</option>
+                                   {CATEGORIES.filter(c => c.key !== 'picked' && c.key !== 'all').map(c => (
+                                      <option key={c.key} value={c.key}>{c.label}</option>
+                                   ))}
+                                </select>
+                                <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-current opacity-50">
+                                    <ChevronDownIcon className="h-4 w-4" />
+                                </div>
+                             </div>
+                          </div>
+                      </div>
+                
+                      {/* גריד מכשירים (ללא שינוי, רק מציג קטגוריה אם מסונן) */}
+                      <section className="grid gap-6">
+                        {activeCat !== 'all' && activeCat !== 'picked' ? (
+                          <h2 className="text-xl font-semibold">{categoryHeb(activeCat as CategoryKey)}</h2>
+                        ) : null}
+                
+                        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                          {filtered.length === 0 && (
+                            <div className="col-span-full opacity-70">
+                              {activeCat === 'picked' ? 'עוד לא נבחרו תרגילים בטאב זה.' : 'לא נמצאו מכשירים תואמים.'}
+                            </div>
+                          )}
+                          {filtered.map((e) => {
+                            const isOn = selected.has(e.id);
+                            const titleHe = e.name_he || e.name_en || 'לא ידוע';
+                            const subtitleEn =
+                              e.name_en && e.name_en.trim() !== '' && e.name_en.trim() !== e.name_he?.trim()
+                                ? e.name_en
+                                : '';
+                
+                            return (
+                              <article
+                                key={e.id}
+                                className={`group rounded-xl ring-1 p-3 md:p-4 cursor-pointer select-none
+                                  ${
+                                    isOn
+                                      ? 'ring-foreground/60 bg-foreground/[.06]'
+                                      : 'ring-black/10 dark:ring-white/10 hover:bg-black/[.03] dark:hover:bg-white/[.04]'
+                                  }`}
+                                onClick={() => activeTabId && toggle(e.id)}
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-xs px-2 py-0.5 rounded-full border border-black/10 dark:border-white/20">
+                                      {e.body_area_he}
+                                    </span>
+                                  </div>
+                                  <span
+                                    className={`inline-flex items-center justify-center text-xs px-2 py-1 rounded-full border
+                                      ${
+                                        isOn
+                                          ? 'bg-foreground text-background border-foreground'
+                                          : 'border-black/10 dark:border-white/20'
+                                      }`}
+                                  >
+                                    {isOn ? 'נבחר' : 'בחר'}
+                                  </span>
+                                </div>
+                
+                                <div className="mt-3 aspect-square overflow-hidden rounded-lg ring-1 ring-black/10 dark:ring-white/10 bg-white">
+                                  <button
+                                    type="button"
+                                    className="h-full w-full flex items-center justify-center"
+                                    onClick={(ev) => {
+                                      ev.stopPropagation();
+                                      openPreview(e.image_url, titleHe);
+                                    }}
+                                    title="הצג תמונה מלאה"
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={e.image_url}
+                                      alt={titleHe}
+                                      className="h-full w-full object-contain"
+                                      loading="lazy"
+                                    />
+                                  </button>
+                                </div>
+                
+                                <div className="mt-3">
+                                  <h3 className="text-base md:text-lg font-semibold leading-tight">{titleHe}</h3>
+                                  {subtitleEn ? (
+                                    <div className="text-sm opacity-80 ltr:font-medium">{subtitleEn}</div>
+                                  ) : null}
+                
+                                  {e.muscles_he?.length ? (
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                      {e.muscles_he.slice(0, 6).map((m, idx) => (
+                                        <span
+                                          key={`${e.id}-m-${idx}`}
+                                          className="text-[11px] px-2 py-0.5 rounded-full border border-black/10 dark:border-white/20"
+                                        >
+                                          {m}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                
+                                  <p className="text-sm mt-2 opacity-90">{e.description}</p>
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      </section>
+                
+                      {/* סרגל פעולה בתחתית */}
+                      <div className="sticky bottom-3">
+                        <div className="mx-auto max-w-6xl">
+                          <div className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background/90 supports-[backdrop-filter]:bg-background/75 backdrop-blur p-3 md:p-4 flex flex-col md:flex-row items-center gap-3 md:gap-4 justify-between shadow-lg">
+                            <div className="text-sm text-center md:text-right">
+                              טאב נוכחי:{' '}
+                              <b>{(tabs.find((t) => t.id === activeTabId)?.name) || '—'}</b>{' '}
+                              · <b>{selected.size}</b> מכשירים נבחרו
+                              {diffPlus(selected, selectedInitial).length > 0 ||
+                              diffPlus(selectedInitial, selected).length > 0 ? (
+                                <span className="opacity-70"> (יש שינויים שלא נשמרו)</span>
+                              ) : null}
+                            </div>
+                            <div className="flex items-center gap-2 w-full md:w-auto">
+                              <button
+                                onClick={clearSelection}
+                                className="flex-1 md:flex-none rounded-lg border border-black/10 dark:border-white/20 px-3 py-2 text-sm hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                              >
+                                נקה בחירות
+                              </button>
+                              <button
+                                disabled={saving || !activeTabId}
+                                onClick={save}
+                                className="flex-1 md:flex-none rounded-lg px-4 py-2 h-11 bg-foreground text-background hover:opacity-90 disabled:opacity-50 font-medium"
+                              >
+                                {saving ? 'שומר…' : 'שמור לטאב'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                
+                      {error && <p className="text-sm text-red-600">{error}</p>}
+                    </div>
+                  );
+                }
+                // ===== End Section 3 =====
+                
+                
+                // ===== Section 4 — Matching Logic (DB Equipment ↔ JSON Exercises) =====
+                function pickBestJsonMatch(
+                  equip: { name_en: string; name_he: string; category: CategoryKey },
+                  list: ExerciseJson[]
+                ): ExerciseJson | undefined {
+                  if (!list.length) return undefined;
+                
+                  const target = `${equip.name_en} ${equip.name_he}`.toLowerCase();
+                  let best: { ex: ExerciseJson; score: number } | null = null;
+                
+                  for (const ex of list) {
+                    const nHe = (ex.name_he || '').toLowerCase();
+                    const nEn = (ex.name_en || '').toLowerCase();
+                    let score = 0;
+                
+                    if (nHe && (target.includes(nHe) || nHe.includes(equip.name_he.toLowerCase()))) score += 5;
+                    if (nEn && (target.includes(nEn) || nEn.includes(equip.name_en.toLowerCase()))) score += 5;
+                
+                    const tokens = tokenSet(target);
+                    const nameTokens = new Set([...tokenSet(nHe), ...tokenSet(nEn)]);
+                    const overlap = intersectCount(tokens, nameTokens);
+                    score += Math.min(overlap, 3); // cap
+                
+                    const exCat = catFromBodyAreaHeb(ex.body_area_he || '');
+                    if (exCat === equip.category) score += 2;
+                
+                    if (!best || score > best.score) best = { ex, score };
+                  }
+                  return best && best.score >= 2 ? best.ex : undefined;
+                }
+                
+                function tokenSet(s: string) {
+                  return new Set(s.split(/[\s\-\(\),.'"/]+/).filter(Boolean));
+                }
+                function intersectCount(a: Set<string>, b: Set<string>) {
+                  let c = 0;
+                  for (const x of a) if (b.has(x)) c++;
+                  return c;
+                }
+                // ===== End Section 4 =====
+                
+                
+                
+                // ===== Section 5 — Category/Description Helpers =====
+                function categoryLabel(c: CategoryKey) {
+                  return categoryHeb(c).toLowerCase();
+                }
+                
+                function categoryHeb(c: CategoryKey): string {
+                  switch (c) {
+                    case 'chest': return 'חזה';
+                    case 'back': return 'גב';
+                    case 'shoulders': return 'כתפיים';
+                    case 'legs': return 'רגליים';
+                    case 'arms': return 'ידיים';
+                    case 'core': return 'ליבה';
+                    case 'cardio': return 'קרדיו';
+                    default: return 'אחר';
+                  }
+                }
+                
+                function catFromBodyAreaHeb(body_he: string): CategoryKey {
+                  const s = (body_he || '').trim();
+                  if (/(מותני|מותניים)/.test(s)) return 'core';
+                  if (/(ירך|ירכיים|ירכי)/.test(s)) return 'legs';
+                  if (/(קרדיו|אירובי|לב.?ר.?א?ה)/.test(s)) return 'cardio';
+                  if (/חזה/.test(s)) return 'chest';
+                  if (/גב/.test(s)) return 'back';
+                  if (/כתפ/.test(s)) return 'shoulders';
+                  if (/רגל/.test(s)) return 'legs';
+                  if (/יד/.test(s)) return 'arms';
+                  if (/ליבה|בטן/.test(s)) return 'core';
+                  return 'other';
+                }
+                
+                function guessCategory(name_en: string, name_he: string): CategoryKey {
+                  const s = `${name_en} ${name_he}`.toLowerCase();
+                  if (/(מותני|מותניים)/.test(s)) return 'core';
+                  if (/(ירך|ירכיים)/.test(s)) return 'legs';
+                  if (/(קרדיו|אירובי|לב.?ר.?א?ה)/.test(s)) return 'cardio';
+                  if (/\b(chest|pec|fly)\b/.test(s) || /חזה/.test(s)) return 'chest';
+                  if (/\b(lat|row(?!er)|pull|pulldown|back)\b/.test(s) || /(גב|חתירה)/.test(s)) return 'back';
+                  if (/\b(shoulder|overhead|press)\b/.test(s) || /כתפ/.test(s)) return 'shoulders';
+                  if (/\b(leg|squat|press|extension|curl|quad|hamstring)\b/.test(s) || /(רגל|ירך|שוק|ירכיים)/.test(s)) return 'legs';
+                  if (/\b(biceps|triceps|curl|dip|pushdown)\b/.test(s) || /(יד|מרפק)/.test(s)) return 'arms';
+                  if (/\b(core|ab|crunch|plank)\b/.test(s) || /(בטן|ליבה|מותני|מותניים)/.test(s)) return 'core';
+                  if (/\b(treadmill|elliptical|bike|cycling|rower|rowing|stair|stepper|spinning|run|walk)\b/.test(s) || /(קרדיו|מסלול|הליכון|אופניים|אליפטי|חתירה|מדרגות|ריצה|הליכה|אירובי)/.test(s)) return 'cardio';
+                  return 'other';
+                }
+                
+                function genericDescription(cat: CategoryKey): string {
+                  switch (cat) {
+                    case 'chest': return 'מכשיר לחיזוק ופיתוח שרירי החזה.';
+                    case 'back': return 'מכשיר לעבודה על שרירי הגב והיציבה.';
+                    case 'shoulders': return 'מכשיר לפיתוח שרירי הכתף.';
+                    case 'legs': return 'מכשיר לחיזוק ופיתוח שרירי הרגליים.';
+                    case 'arms': return 'מכשיר לעבודה ממוקדת על שרירי הידיים.';
+                    case 'core': return 'מכשיר/תרגיל לחיזוק שרירי הליבה והבטן.';
+                    case 'cardio': return 'מכשיר קרדיו לשיפור סבולת ומערכת לב־ריאה.';
+                    default: return 'מכשיר כללי לאימון פונקציונלי.';
+                  }
+                }
+                
+                function diffPlus(a: Set<number>, b: Set<number>) {
+                  const out: number[] = [];
+                  for (const x of a) if (!b.has(x)) out.push(x);
+                  return out;
+                }
+                // ===== End Section 5 =====
+                
+                
+                
+                // ===== Section 6 — Small UI Bits =====
+                function SectionCard({
+                  title,
+                  subtitle,
+                  children,
+                }: {
+                  title: string;
+                  subtitle?: string;
+                  children: React.ReactNode;
+                }) {
+                  return (
+                    <section className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background">
+                      <div className="p-4 md:p-6 border-b border-black/10 dark:border-white/10">
+                        <h2 className="text-xl font-semibold">{title}</h2>
+                        {subtitle && (
+                          <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">{subtitle}</p>
+                        )}
+                      </div>
+                      <div className="p-4 md:p-6">{children}</div>
+                    </section>
+                  );
+                }
+                
+                function SearchField({
+                  label,
+                  value,
+                  onChange,
+                  placeholder,
+                }: {
+                  label: string;
+                  value: string;
+                  onChange: (v: string) => void;
+                  placeholder?: string;
+                }) {
+                  return (
+                    <label className="grid gap-1">
+                      <span className="text-sm">{label}</span>
+                      <input
+                        type="text"
+                        value={value}
+                        placeholder={placeholder}
+                        onChange={(e) => onChange(e.target.value)}
+                        className="w-full min-w-0 rounded-lg border border-black/10 dark:border-white/20 bg-transparent px-3 py-2 text-right
+                                   focus-visible:outline-none focus:ring-2 focus:ring-foreground/40"
+                      />
+                    </label>
+                  );
+                }
+                
+                // ===== Lightbox (Full Image Preview) =====
+                function ImageLightbox({
+                  open,
+                  url,
+                  alt,
+                  onClose,
+                }: {
+                  open: boolean;
+                  url: string;
+                  alt: string;
+                  onClose: () => void;
+                }) {
+                  if (!open) return null;
+                  return (
+                    <div
+                      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in"
+                      role="dialog"
+                      aria-modal="true"
+                      onClick={onClose}
+                    >
+                      <div className="relative max-w-5xl w-full" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={onClose}
+                          className="absolute -top-10 left-0 md:-left-10 text-white opacity-70 hover:opacity-100"
+                          aria-label="סגור"
+                        >
+                          ✕ סגור
+                        </button>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={url}
+                          alt={alt}
+                          className="max-h-[85vh] w-full object-contain rounded-lg shadow-2xl bg-white"
+                        />
+                      </div>
+                    </div>
+                  );
+                }
+                
+                function MagicIcon(props: { className?: string }) {
+                  return (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={props.className}>
+                      <path d="M15 4V2m0 2l-2-2m2 2l2-2M15 4h2M15 4H13" />
+                      <path d="M19 15v-2m0 2l-2-2m2 2l2-2M19 15h2M19 15h-2" />
+                      <path d="M8.5 4a5.5 5.5 0 0 1 5.5 5.5v1a5.5 5.5 0 0 1-5.5 5.5H8a5.5 5.5 0 0 1-5.5-5.5v-1A5.5 5.5 0 0 1 8 5.5h.5Z" />
+                    </svg>
+                  );
+                }
+                
+                function ChevronDownIcon(props: { className?: string }) {
+                  return (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}>
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  );
+                }
+                // ===== End Section 6 =====
+                
+                // we will need to split this script into components and hooks, but for the sake of this exercise, I kept everything in one file for easier reading and context understanding.
+        Folder: login
+            File: page.tsx
+                Code:
+                // gym-tracker-app/src/app/login/page.tsx
+                'use client';
+                
+                import { useState } from 'react';
+                import { useRouter } from 'next/navigation';
+                import Link from 'next/link';
+                import { supabase } from '@/lib/supabaseClient';
+                
+                export default function LoginPage() {
+                  const router = useRouter();
+                  const [email, setEmail] = useState('');
+                  const [password, setPassword] = useState('');
+                  const [busy, setBusy] = useState(false);
+                  const [error, setError] = useState<string | null>(null);
+                
+                  const onSubmit = async (e: React.FormEvent) => {
+                    e.preventDefault();
+                    setBusy(true);
+                    setError(null);
+                
+                    const { error } = await supabase.auth.signInWithPassword({
+                      email,
+                      password,
+                    });
+                
+                    setBusy(false);
+                
+                    if (error) {
+                      setError(error.message);
+                      return;
+                    }
+                    router.push('/'); // חזרה לדף הבית
+                  };
+                
+                  return (
+                    <div className="max-w-md" dir="rtl">
+                      <h1 className="text-3xl font-bold tracking-tight">🔑 התחברות</h1>
+                      <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                        אין לך חשבון?{' '}
+                        <Link className="underline underline-offset-4" href="/signup">
+                          📝 הרשמה
+                        </Link>
+                      </p>
+                
+                      <form onSubmit={onSubmit} className="mt-6 grid gap-4">
+                        <label className="grid gap-1">
+                          <span className="text-sm">✉️ אימייל</span>
+                          <input
+                            type="email"
+                            required
+                            autoComplete="email"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="name@example.com"
+                            className="rounded-md border border-black/10 dark:border-white/20 bg-transparent px-3 py-2 text-right"
+                          />
+                        </label>
+                
+                        <label className="grid gap-1">
+                          <span className="text-sm">🔒 סיסמה</span>
+                          <input
+                            type="password"
+                            required
+                            autoComplete="current-password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="הקלד/י סיסמה"
+                            className="rounded-md border border-black/10 dark:border-white/20 bg-transparent px-3 py-2 text-right"
+                          />
+                        </label>
+                
+                        <button
+                          disabled={busy}
+                          className="rounded-md px-4 py-2 h-11 bg-foreground text-background hover:opacity-90 disabled:opacity-50"
+                        >
+                          {busy ? '⏳ מתחבר/ת…' : '➡️ כניסה'}
+                        </button>
+                
+                        {error && <p className="text-sm text-red-600">❗ שגיאה: {error}</p>}
+                      </form>
+                    </div>
+                  );
+                }
+
