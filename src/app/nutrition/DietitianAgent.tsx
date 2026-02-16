@@ -1,14 +1,17 @@
-// gym-tracker-app\src\app\nutrition\DietitianAgent.tsx
+// src/app/nutrition/DietitianAgent.tsx
 
+/* =========================
+   SECTION 1 — Imports & Types
+   ========================= */
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { SectionCard } from './ui';
 
-// Types - הוספנו תמיכה לעמודות החדשות
+// Types
 type DietitianProfile = {
-  medical_info: string; // מכיל מידע רפואי + תרופות/תוספים
+  medical_info: string;
   dietary_preferences: string[];
   schedule_info: { wake_up: string; sleep: string };
   cooking_preference: 'quick' | 'chef';
@@ -55,11 +58,24 @@ type Recipe = {
   tips: string;
 };
 
+type ChatMessage = {
+    role: 'user' | 'ai';
+    content: string;
+    recommendation?: Recommendation;
+};
+/* =========================
+   END SECTION 1
+   ========================= */
+
+
+/* =========================
+   SECTION 2 — Component & State
+   ========================= */
 export default function DietitianAgent({ userId, logs, userGoals, userProfileData, weightHistory }: { 
     userId: string; 
     logs: any[]; 
     userGoals: any[];
-    userProfileData: any; // Height, Weight, gender, etc.
+    userProfileData: any; 
     weightHistory: any[]; 
 }) {
   const [loading, setLoading] = useState(true);
@@ -68,23 +84,31 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
   
   // Settings & Targets
   const [calculatedTargets, setCalculatedTargets] = useState<DailyTotals>({ calories: 0, protein: 0, carbs: 0, fat: 0 });
-  const [realTimeStatus, setRealTimeStatus] = useState<any>(null); // שומר את השורה המלאה מ-user_nutrition_targets
+  const [realTimeStatus, setRealTimeStatus] = useState<any>(null);
   
   // Data States
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
   const [favorites, setFavorites] = useState<any[]>([]);
-  const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
   
   // Action States & UI Modes
-  const [analyzing, setAnalyzing] = useState(false); // General loading state for analysis
-  const [analysisMode, setAnalysisMode] = useState<'daily' | 'weekly' | null>(null); // Track which analysis is being generated
-  const [displayMode, setDisplayMode] = useState<'daily' | 'weekly'>('daily'); // טאב פעיל למעבר בין הסקירות
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisMode, setAnalysisMode] = useState<'daily' | 'weekly' | null>(null);
+  const [displayMode, setDisplayMode] = useState<'daily' | 'weekly'>('daily');
+  const [isChatOpen, setIsChatOpen] = useState(false);
   
   const [generatingPlan, setGeneratingPlan] = useState(false);
-  const [recommending, setRecommending] = useState(false);
   const [loadingRecipe, setLoadingRecipe] = useState<string | null>(null);
   const [activeRecipe, setActiveRecipe] = useState<{name: string, data: Recipe} | null>(null);
   
+  // Day Selection for Meal Plan (New)
+  const [selectedPlanDay, setSelectedPlanDay] = useState(0);
+
+  // Chat States
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+
   // Feedback States
   const [usedModel, setUsedModel] = useState<string | null>(null);
 
@@ -96,13 +120,26 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
     cooking_preference: 'quick'
   });
 
-  // State נפרד להקלדה חלקה של העדפות תזונה (מונע קפיצות ומחיקת רווחים)
   const [dietaryInput, setDietaryInput] = useState('');
 
   useEffect(() => {
     loadAllData();
   }, [userId]);
 
+  // Auto-scroll chat
+  useEffect(() => {
+    if (isChatOpen && chatBottomRef.current) {
+        chatBottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, chatLoading, isChatOpen]);
+/* =========================
+   END SECTION 2
+   ========================= */
+
+
+/* =========================
+   SECTION 3 — Data Loading
+   ========================= */
   async function loadAllData() {
     setLoading(true);
     await Promise.all([
@@ -119,10 +156,8 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
     if (data) {
       setProfile(data);
       setFormData(data);
-      // עדכון ה-State של ההקלדה החופשית
       setDietaryInput(data.dietary_preferences?.join(', ') || '');
       setView('dashboard');
-      // Set initial view based on what exists
       if (data.last_daily_analysis_html) {
           setDisplayMode('daily');
       } else if (data.last_weekly_analysis_html) {
@@ -143,7 +178,6 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
     if (data) setFavorites(data);
   }
 
-  // טעינת יעדים - נותן עדיפות לטבלת user_nutrition_targets אם קיימת
   async function loadAndCalcTargets() {
       const { data: dbStatus } = await supabase
         .from('user_nutrition_targets')
@@ -194,11 +228,17 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
           fat: targetFat
       });
   }
+/* =========================
+   END SECTION 3
+   ========================= */
 
+
+/* =========================
+   SECTION 4 — Save & Auth
+   ========================= */
   async function saveProfile() {
     setLoading(true);
     
-    // ניקוי הרווחים (trim) והמרה למערך נעשים רק בזמן השמירה כדי לאפשר למשתמש להקליד בנוחות
     const cleanedPreferences = dietaryInput.split(',').map(s => s.trim()).filter(Boolean);
     const cleanedData = {
       ...formData,
@@ -215,7 +255,6 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
     setLoading(false);
   }
 
-  // --- Helper to get headers with API Key ---
   const getAuthHeaders = () => {
     const customKey = typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') : null;
     return {
@@ -223,15 +262,19 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
       ...(customKey ? { 'x-custom-api-key': customKey } : {})
     };
   };
+/* =========================
+   END SECTION 4
+   ========================= */
 
-  // --- API Calls ---
 
+/* =========================
+   SECTION 5 — API Calls & Chat Logic
+   ========================= */
   async function handleAnalyze(mode: 'daily' | 'weekly' = 'daily', currentProfile = profile) {
     if (!currentProfile) return;
     setAnalyzing(true);
     setAnalysisMode(mode);
     
-    // סינון לוגים לפי המצב הנבחר
     const now = new Date();
     let filteredLogs = [];
 
@@ -255,7 +298,7 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
     try {
       const res = await fetch('/api/dietitian-ai/analyze', {
         method: 'POST',
-        headers: getAuthHeaders(), // שימוש ב-Helper החדש
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           userId,
           mode, 
@@ -273,7 +316,6 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
       updateModelFeedback(res);
 
       if (data.result) {
-        // בחירת העמודה הנכונה לשמירה (מפריד בין יומי לשבועי)
         const updateField = mode === 'daily' ? 'last_daily_analysis_html' : 'last_weekly_analysis_html';
 
         setProfile(prev => prev ? ({ 
@@ -285,7 +327,7 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
             [updateField]: data.result,
         }).eq('user_id', userId);
 
-        setDisplayMode(mode); // העברה אוטומטית לטאב הרלוונטי
+        setDisplayMode(mode);
       }
     } catch (e) {
       alert('שגיאה בניתוח הנתונים');
@@ -302,7 +344,7 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
         
         const res = await fetch('/api/dietitian-ai/generate-plan', {
             method: 'POST',
-            headers: getAuthHeaders(), // שימוש ב-Helper החדש
+            headers: getAuthHeaders(),
             body: JSON.stringify({
               userId,
               userProfile: { goals: userGoals },
@@ -318,6 +360,7 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
 
           if (data.days) {
               setMealPlan(data);
+              setSelectedPlanDay(0); // איפוס ליום הראשון
               await supabase.from('user_meal_plans').insert({ user_id: userId, plan_data: data });
           }
     } catch(e) {
@@ -327,49 +370,79 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
     }
   }
 
-  async function handleRecommendNow(eatenCalories: number, eatenProtein: number) {
-    setRecommending(true);
-    setRecommendation(null);
+  // Chat Logic
+  async function sendChatMessage(userText?: string) {
+    if (userText) {
+        setChatMessages(prev => [...prev, { role: 'user', content: userText }]);
+    }
+
+    setChatInput('');
+    setChatLoading(true);
+
     try {
+        const eatenCals = logs.filter(l => new Date(l.occurred_at).toDateString() === new Date().toDateString()).reduce((a, b) => a + (b.calories || 0), 0);
+        const eatenProt = logs.filter(l => new Date(l.occurred_at).toDateString() === new Date().toDateString()).reduce((a, b) => a + (b.protein_g || 0), 0);
+
         const res = await fetch('/api/dietitian-ai/recommend', {
             method: 'POST',
-            headers: getAuthHeaders(), // שימוש ב-Helper החדש
+            headers: getAuthHeaders(),
             body: JSON.stringify({
               userId,
               preferences: profile,
               userProfile: userProfileData,
               favorites: favorites,
+              history: userText ? [...chatMessages, { role: 'user', content: userText }] : chatMessages, 
               currentContext: {
                 time: new Date().toLocaleTimeString('he-IL', {hour: '2-digit', minute:'2-digit'}),
-                eatenCalories,
-                eatenProtein,
+                eatenCalories: eatenCals,
+                eatenProtein: eatenProt,
                 targetCalories: calculatedTargets.calories, 
                 targetProtein: calculatedTargets.protein
               }
             })
           });
+
           const data = await res.json();
           updateModelFeedback(res);
-          setRecommendation(data);
+
+          if (data.type === 'recommendation' && data.data) {
+              setChatMessages(prev => [
+                  ...prev, 
+                  { role: 'ai', content: data.message, recommendation: data.data }
+              ]);
+          } else {
+              setChatMessages(prev => [
+                  ...prev, 
+                  { role: 'ai', content: data.message || "מצטערת, הייתה שגיאה בתשובה." }
+              ]);
+          }
+
     } catch(e) {
         console.error(e);
+        setChatMessages(prev => [...prev, { role: 'ai', content: "נתקלתי בבעיה קטנה, אפשר לנסות שוב?" }]);
     } finally {
-        setRecommending(false);
+        setChatLoading(false);
     }
   }
 
-  // --- שונה: פונקציה זו כעת מקבלת גם את תיאור המנה כדי להגביל את ה-AI למנה יחידה מדויקת ---
+  const startNewChat = () => {
+    if (chatMessages.length > 0) {
+        if (!confirm('להתחיל שיחה חדשה? ההיסטוריה הנוכחית תימחק.')) return;
+    }
+    setChatMessages([]);
+  };
+
   async function handleGetRecipe(mealName: string, mealDesc?: string) {
       setLoadingRecipe(mealName);
       try {
         const res = await fetch('/api/dietitian-ai/recipe', {
             method: 'POST',
-            headers: getAuthHeaders(), // שימוש ב-Helper החדש
+            headers: getAuthHeaders(),
             body: JSON.stringify({
               userId,
               preferences: profile,
               mealName,
-              mealDesc // שליחת תיאור המנה (שכולל כמויות) ל-API
+              mealDesc
             })
           });
           const data = await res.json();
@@ -401,9 +474,14 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
       const model = res.headers.get('x-model-used');
       if (model) setUsedModel(model);
   }
+/* =========================
+   END SECTION 5
+   ========================= */
 
-  // --- UI Components ---
 
+/* =========================
+   SECTION 6 — UI Components
+   ========================= */
   const PlanSummaryBadge = ({ label, value, target, unit }: { label: string, value: number, target: number, unit: string }) => {
       const pct = Math.min(100, Math.round((value / target) * 100));
       const color = pct > 110 ? 'text-red-600' : pct < 80 ? 'text-yellow-600' : 'text-emerald-600';
@@ -417,7 +495,14 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
   };
 
   if (loading) return <div className="p-8 text-center opacity-50">טוען את הדיאטנית שלך...</div>;
+/* =========================
+   END SECTION 6
+   ========================= */
 
+
+/* =========================
+   SECTION 7 — Onboarding View
+   ========================= */
   if (view === 'onboarding') {
     return (
         <SectionCard title="הגדרת דיאטנית אישית" subtitle="בוא/י נגדיר את ההעדפות שלך לדיוק מקסימלי.">
@@ -458,10 +543,16 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
         </SectionCard>
       );
   }
+/* =========================
+   END SECTION 7
+   ========================= */
 
+
+/* =========================
+   SECTION 8 — Dashboard (Header & Status)
+   ========================= */
   // VIEW: Dashboard
   const eatenCals = logs.filter(l => new Date(l.occurred_at).toDateString() === new Date().toDateString()).reduce((a, b) => a + (b.calories || 0), 0);
-  const eatenProt = logs.filter(l => new Date(l.occurred_at).toDateString() === new Date().toDateString()).reduce((a, b) => a + (b.protein_g || 0), 0);
   const userGender = userProfileData.gender === 'female' ? 'female' : 'male';
 
   return (
@@ -473,6 +564,23 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
          </div>
          <button onClick={() => setView('onboarding')} className="text-sm bg-gray-100 dark:bg-white/10 px-3 py-1 rounded-full">⚙️ פרופיל ורפואי</button>
       </div>
+
+      {/* --- New Chat Trigger Button --- */}
+      <button 
+        onClick={() => setIsChatOpen(true)}
+        className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 rounded-xl shadow-lg flex items-center justify-between mb-6 group transform transition hover:scale-[1.01] active:scale-[0.99]"
+      >
+        <div className="flex items-center gap-3">
+            <span className="text-2xl bg-white/20 p-2 rounded-lg shadow-inner">💬</span>
+            <div className="text-right">
+                <div className="font-bold text-lg">מה לאכול עכשיו?</div>
+                <div className="text-xs text-indigo-100">התייעצות צ'אט בזמן אמת עם הדיאטנית</div>
+            </div>
+        </div>
+        <div className="bg-white/20 p-2 rounded-full group-hover:bg-white/30 transition">
+             ➤
+        </div>
+      </button>
 
       {/* --- Section 1: Insight / Status (TABS System) --- */}
       <SectionCard title="סקירת מצב נוכחית">
@@ -541,143 +649,256 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
              </button>
           </div>
       </SectionCard>
+{/* =========================
+   END SECTION 8
+   ========================= */}
 
-      <div className="grid md:grid-cols-2 gap-6">
-          {/* --- Section 2: Weekly Plan --- */}
-          <SectionCard title="תפריט מותאם אישית">
-             <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-                תפריט המבוסס על ההרגלים שלך, היעדים היומיים ({calculatedTargets.calories} קק"ל, {calculatedTargets.protein} גרם חלבון) והלו"ז האישי.
-             </p>
-             <button 
-               onClick={handleGeneratePlan}
-               disabled={generatingPlan}
-               className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-xl shadow hover:opacity-90 transition disabled:opacity-50"
-             >
-                {generatingPlan ? 'בונה תפריט חכם (מנתח הרגלים)...' : '📅 צור תוכנית שבועית'}
-             </button>
-             
-             {mealPlan && (
-                 <div className="mt-6 space-y-6 animate-in fade-in slide-in-from-top-4">
-                    <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-xl text-sm border border-emerald-100 dark:border-emerald-900/30">
-                        {mealPlan.summary}
-                    </div>
-                    {mealPlan.days.map((day, idx) => (
-                        <div key={idx} className="border border-black/10 dark:border-white/10 rounded-xl overflow-hidden shadow-sm bg-white dark:bg-neutral-900">
-                            {/* כותרת יום + סיכום ערכים */}
-                            <div className="bg-gray-50 dark:bg-white/5 p-3 border-b border-black/5 dark:border-white/5">
-                                <h4 className="font-bold text-lg text-emerald-700 dark:text-emerald-400 mb-3">{day.day_title}</h4>
-                                <div className="flex gap-2 justify-between">
-                                    <PlanSummaryBadge label="קלוריות" value={day.daily_totals?.calories || 0} target={calculatedTargets.calories} unit="" />
-                                    <PlanSummaryBadge label="חלבון" value={day.daily_totals?.protein || 0} target={calculatedTargets.protein} unit="g" />
-                                    <PlanSummaryBadge label="פחמימה" value={day.daily_totals?.carbs || 0} target={calculatedTargets.carbs} unit="g" />
-                                    <PlanSummaryBadge label="שומן" value={day.daily_totals?.fat || 0} target={calculatedTargets.fat} unit="g" />
-                                </div>
-                            </div>
 
-                            {/* רשימת ארוחות */}
-                            <ul className="p-3 space-y-3 text-sm">
-                                {day.meals.map((meal, mIdx) => {
-                                    const isFav = favorites.some(f => f.meal_name === meal.name);
-                                    return (
-                                    <li key={mIdx} className="flex flex-col gap-2 bg-white dark:bg-black/20 p-3 rounded-lg border border-black/5 dark:border-white/5 hover:border-black/10 transition-colors">
-                                        <div className="flex justify-between items-start">
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-xs font-mono bg-black/5 dark:bg-white/10 px-1.5 py-0.5 rounded">{meal.time}</span>
-                                                <span className="font-bold text-base">{meal.name}</span>
-                                            </div>
-                                            <button onClick={() => toggleFavorite(meal.name)} className={`transition transform active:scale-95 ${isFav ? 'opacity-100 scale-110' : 'opacity-30 hover:opacity-100 grayscale hover:grayscale-0'}`} title="שמור למועדפים">
-                                                {isFav ? '❤️' : '🤍'}
-                                            </button>
-                                        </div>
-                                        
-                                        <p className="text-xs opacity-70 leading-snug">{meal.desc}</p>
-                                        
-                                        <div className="flex justify-between items-end mt-1 pt-2 border-t border-dashed border-black/5 dark:border-white/5">
-                                            <span className="text-xs font-medium opacity-60">{meal.calories} קק"ל · {meal.protein}g חלבון</span>
-                                            <button 
-                                                // כאן אנחנו מעבירים גם את התיאור של המנה (עם הכמויות המדויקות)
-                                                onClick={() => handleGetRecipe(meal.name, meal.desc)}
-                                                className="flex items-center gap-1 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 px-3 py-1 rounded-full text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition"
-                                            >
-                                                {loadingRecipe === meal.name ? 'מכין...' : '📜 מתכון'}
-                                            </button>
-                                        </div>
-                                    </li>
-                                )})}
-                            </ul>
+{/* =========================
+   SECTION 9 — Weekly Plan & Chat UI
+   ========================= */}
+      {/* --- Section 2: Weekly Plan (Full Width Now) --- */}
+      <SectionCard title="תפריט מותאם אישית">
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+             תפריט המבוסס על ההרגלים שלך, היעדים היומיים ({calculatedTargets.calories} קק"ל, {calculatedTargets.protein} גרם חלבון) והלו"ז האישי.
+          </p>
+          <button 
+           onClick={handleGeneratePlan}
+           disabled={generatingPlan}
+           className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-xl shadow hover:opacity-90 transition disabled:opacity-50"
+          >
+              {generatingPlan ? 'בונה תפריט חכם (מנתח הרגלים)...' : '📅 צור תוכנית שבועית'}
+          </button>
+          
+          {mealPlan && (
+              <div className="mt-6 space-y-6 animate-in fade-in slide-in-from-top-4">
+                  
+                  {/* Summary Box */}
+                  <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-xl text-sm border border-emerald-100 dark:border-emerald-900/30">
+                      {mealPlan.summary}
+                  </div>
 
-                            {/* הסבר לוגי יומי */}
-                            {day.daily_reasoning && (
-                                <div className="bg-yellow-50 dark:bg-yellow-900/10 p-3 text-xs text-yellow-800 dark:text-yellow-200 border-t border-yellow-100 dark:border-yellow-900/20 italic">
-                                    💡 <strong>למה תפריט זה?</strong> {day.daily_reasoning}
-                                </div>
-                            )}
+                  {/* Day Tabs Selector */}
+                  <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar border-b border-black/5 dark:border-white/5">
+                      {mealPlan.days.map((day, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => setSelectedPlanDay(idx)}
+                            className={`whitespace-nowrap px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                                selectedPlanDay === idx
+                                ? 'bg-emerald-600 text-white shadow-md'
+                                : 'bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20'
+                            }`}
+                          >
+                             {day.day_title}
+                          </button>
+                      ))}
+                  </div>
+
+                  {/* Single Selected Day Display */}
+                  {mealPlan.days[selectedPlanDay] && (
+                      <div className="border border-black/10 dark:border-white/10 rounded-xl overflow-hidden shadow-sm bg-white dark:bg-neutral-900 animate-in fade-in duration-300">
+                          {/* Day Header */}
+                          <div className="bg-gray-50 dark:bg-white/5 p-3 border-b border-black/5 dark:border-white/5">
+                              <h4 className="font-bold text-lg text-emerald-700 dark:text-emerald-400 mb-3">{mealPlan.days[selectedPlanDay].day_title}</h4>
+                              <div className="flex gap-2 justify-between">
+                                  <PlanSummaryBadge label="קלוריות" value={mealPlan.days[selectedPlanDay].daily_totals?.calories || 0} target={calculatedTargets.calories} unit="" />
+                                  <PlanSummaryBadge label="חלבון" value={mealPlan.days[selectedPlanDay].daily_totals?.protein || 0} target={calculatedTargets.protein} unit="g" />
+                                  <PlanSummaryBadge label="פחמימה" value={mealPlan.days[selectedPlanDay].daily_totals?.carbs || 0} target={calculatedTargets.carbs} unit="g" />
+                                  <PlanSummaryBadge label="שומן" value={mealPlan.days[selectedPlanDay].daily_totals?.fat || 0} target={calculatedTargets.fat} unit="g" />
+                              </div>
+                          </div>
+
+                          {/* Meal List */}
+                          <ul className="p-3 space-y-3 text-sm">
+                              {mealPlan.days[selectedPlanDay].meals.map((meal, mIdx) => {
+                                  const isFav = favorites.some(f => f.meal_name === meal.name);
+                                  return (
+                                  <li key={mIdx} className="flex flex-col gap-2 bg-white dark:bg-black/20 p-3 rounded-lg border border-black/5 dark:border-white/5 hover:border-black/10 transition-colors">
+                                      <div className="flex justify-between items-start">
+                                          <div className="flex items-center gap-2">
+                                              <span className="text-xs font-mono bg-black/5 dark:bg-white/10 px-1.5 py-0.5 rounded">{meal.time}</span>
+                                              <span className="font-bold text-base">{meal.name}</span>
+                                          </div>
+                                          <button onClick={() => toggleFavorite(meal.name)} className={`transition transform active:scale-95 ${isFav ? 'opacity-100 scale-110' : 'opacity-30 hover:opacity-100 grayscale hover:grayscale-0'}`} title="שמור למועדפים">
+                                              {isFav ? '❤️' : '🤍'}
+                                          </button>
+                                      </div>
+                                      
+                                      <p className="text-xs opacity-70 leading-snug">{meal.desc}</p>
+                                      
+                                      <div className="flex justify-between items-end mt-1 pt-2 border-t border-dashed border-black/5 dark:border-white/5">
+                                          <span className="text-xs font-medium opacity-60">{meal.calories} קק"ל · {meal.protein}g חלבון</span>
+                                          <button 
+                                              onClick={() => handleGetRecipe(meal.name, meal.desc)} 
+                                              className="flex items-center gap-1 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 px-3 py-1 rounded-full text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition"
+                                          >
+                                              {loadingRecipe === meal.name ? 'מכין...' : '📜 מתכון'}
+                                          </button>
+                                      </div>
+                                  </li>
+                              )})}
+                          </ul>
+
+                          {/* Day Logic */}
+                          {mealPlan.days[selectedPlanDay].daily_reasoning && (
+                              <div className="bg-yellow-50 dark:bg-yellow-900/10 p-3 text-xs text-yellow-800 dark:text-yellow-200 border-t border-yellow-100 dark:border-yellow-900/20 italic">
+                                  💡 <strong>למה תפריט זה?</strong> {mealPlan.days[selectedPlanDay].daily_reasoning}
+                              </div>
+                          )}
+                      </div>
+                  )}
+              </div>
+          )}
+      </SectionCard>
+
+      {/* --- Chat Modal (Full Screen Overlay) --- */}
+      {isChatOpen && (
+         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4">
+            <div className="bg-gray-50 dark:bg-neutral-900 w-full sm:max-w-lg h-[90vh] sm:h-[80vh] rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-300">
+               
+               {/* Modal Header */}
+               <div className="p-4 bg-white dark:bg-neutral-800 border-b border-black/5 dark:border-white/5 flex justify-between items-center shrink-0">
+                  <h3 className="font-bold text-lg">הדיאטנית האישית 💬</h3>
+                  <div className="flex gap-2 items-center">
+                     <button 
+                        onClick={startNewChat}
+                        className="text-xs bg-gray-100 dark:bg-white/10 px-3 py-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-white/20 transition flex items-center gap-1"
+                        title="שיחה חדשה"
+                     >
+                        <span>🧹</span>
+                        <span className="hidden sm:inline">נקה</span>
+                     </button>
+                     <button 
+                        onClick={() => setIsChatOpen(false)} 
+                        className="w-8 h-8 flex items-center justify-center bg-black/5 dark:bg-white/10 rounded-full hover:bg-black/10 dark:hover:bg-white/20 transition"
+                     >
+                        ✕
+                     </button>
+                  </div>
+               </div>
+
+               {/* Chat History Area */}
+               <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-black/20">
+                    {chatMessages.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-center p-4 opacity-60">
+                             <span className="text-4xl mb-2">🍽️</span>
+                             <p>היי {userGender === 'female' ? 'יקירה' : 'יקר'}, אני כאן לעזור!</p>
+                             <p className="text-xs mt-1">ספר/י לי מה בא לך, או לחצ/י למטה להתייעצות מהירה.</p>
                         </div>
-                    ))}
-                 </div>
-             )}
-          </SectionCard>
+                    ) : (
+                        chatMessages.map((msg, idx) => (
+                            <div key={idx} className={`flex flex-col max-w-[85%] ${msg.role === 'user' ? 'self-end items-end' : 'self-start items-start'}`}>
+                                <div className={`px-4 py-2.5 rounded-2xl text-sm shadow-sm ${
+                                    msg.role === 'user' 
+                                    ? 'bg-indigo-600 text-white rounded-br-none' 
+                                    : 'bg-white dark:bg-neutral-800 border border-black/5 dark:border-white/10 rounded-bl-none'
+                                }`}>
+                                    {msg.content}
+                                </div>
+                                
+                                {/* If message has a structured recommendation attached */}
+                                {msg.recommendation && (
+                                     <div className="mt-2 w-full min-w-[280px] bg-white dark:bg-neutral-800 p-4 rounded-xl shadow-md border border-indigo-100 dark:border-indigo-900/30 animate-in zoom-in duration-300">
+                                         <div className="flex justify-between items-start mb-2">
+                                             <h4 className="font-bold text-lg text-indigo-700 dark:text-indigo-400">{msg.recommendation.meal_name}</h4>
+                                             <button onClick={() => toggleFavorite(msg.recommendation!.meal_name, msg.recommendation!.macros)} className="text-lg opacity-50 hover:opacity-100 hover:scale-110 transition">
+                                                 {favorites.some(f => f.meal_name === msg.recommendation!.meal_name) ? '❤️' : '🤍'}
+                                             </button>
+                                         </div>
+                                         <p className="text-xs text-gray-500 dark:text-gray-400 italic mb-3">"{msg.recommendation.reasoning}"</p>
+                                         
+                                         <div className="grid grid-cols-4 gap-1 text-center text-xs bg-gray-50 dark:bg-white/5 p-2 rounded-lg mb-3">
+                                             <div>
+                                                 <div className="font-bold">{msg.recommendation.macros.calories}</div>
+                                                 <div className="opacity-60 text-[10px]">קק"ל</div>
+                                             </div>
+                                             <div>
+                                                 <div className="font-bold">{msg.recommendation.macros.protein}g</div>
+                                                 <div className="opacity-60 text-[10px]">חלבון</div>
+                                             </div>
+                                             <div>
+                                                 <div className="font-bold">{msg.recommendation.macros.carbs}g</div>
+                                                 <div className="opacity-60 text-[10px]">פחמ׳</div>
+                                             </div>
+                                             <div>
+                                                 <div className="font-bold">{msg.recommendation.macros.fat}g</div>
+                                                 <div className="opacity-60 text-[10px]">שומן</div>
+                                             </div>
+                                         </div>
 
-          {/* --- Section 3: Real Time Recommendation --- */}
-          <SectionCard title="מה לאכול עכשיו?">
-             <div className="bg-orange-50 dark:bg-orange-900/10 p-4 rounded-xl border border-orange-100 dark:border-orange-900/20">
-                <div className="flex justify-between items-center mb-2">
-                    <span className="text-xs font-mono opacity-60">{new Date().toLocaleTimeString('he-IL', {hour: '2-digit', minute:'2-digit'})}</span>
-                    <span className="text-xs bg-white dark:bg-black/20 px-2 py-0.5 rounded-full">היום: {Math.round(eatenCals)} קק"ל</span>
+                                         <div className="text-xs bg-indigo-50 dark:bg-indigo-900/10 p-3 rounded-lg border border-indigo-100 dark:border-indigo-900/20 leading-relaxed mb-3">
+                                            <b>הכנה ({msg.recommendation.preparation_time}):</b><br/>
+                                            {msg.recommendation.recipe_outline}
+                                         </div>
+                                         
+                                         <button 
+                                            onClick={() => handleGetRecipe(msg.recommendation!.meal_name, msg.recommendation!.recipe_outline)} 
+                                            className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition"
+                                         >
+                                             📜 מתכון מלא והוראות
+                                         </button>
+                                     </div>
+                                )}
+                            </div>
+                        ))
+                    )}
+                    {chatLoading && (
+                        <div className="self-start bg-gray-100 dark:bg-white/10 px-4 py-2 rounded-2xl rounded-bl-none text-xs flex items-center gap-2 animate-pulse">
+                            <span>מקליד...</span>
+                        </div>
+                    )}
+                    <div ref={chatBottomRef} />
                 </div>
-                <h3 className="font-bold text-lg mb-1">
-                    {userGender === 'female' ? 'רעבה?' : 'רעב?'} בוא/י נבדוק מה חסר ומה מתאים.
-                </h3>
-                
-                <button 
-                  onClick={() => handleRecommendNow(eatenCals, eatenProt)}
-                  disabled={recommending}
-                  className="w-full py-2 bg-orange-500 text-white rounded-lg font-medium shadow hover:bg-orange-600 disabled:opacity-50 mt-3"
-                >
-                    {recommending ? 'בודק העדפות ומועדפים... 🥪' : '🍽️ תן לי המלצה לכרגע'}
-                </button>
 
-                {recommendation && (
-                    <div className="mt-4 bg-white dark:bg-neutral-800 p-4 rounded-lg shadow-sm border border-black/5 dark:border-white/5 animate-in zoom-in duration-200">
-                        <div className="flex justify-between items-start">
-                             <h4 className="font-bold text-lg">{recommendation.meal_name}</h4>
-                             <div className="flex gap-2 items-center">
-                                <button onClick={() => toggleFavorite(recommendation.meal_name, recommendation.macros)} className="text-lg transition hover:scale-110">
-                                    {favorites.some(f => f.meal_name === recommendation.meal_name) ? '❤️' : '🤍'}
-                                </button>
-                                <span className="text-xs bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 px-2 py-1 rounded h-fit">⏱️ {recommendation.preparation_time}</span>
-                             </div>
+                {/* Input Area */}
+                <div className="p-3 bg-white dark:bg-neutral-900 border-t border-black/5 dark:border-white/5 shrink-0 pb-safe">
+                    {/* Quick Suggestions (Only if chat is empty) */}
+                    {chatMessages.length === 0 && (
+                        <div className="flex gap-2 mb-3 overflow-x-auto pb-1 no-scrollbar">
+                            <button onClick={() => sendChatMessage()} className="whitespace-nowrap px-3 py-1.5 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-xs rounded-full font-medium hover:bg-orange-200 dark:hover:bg-orange-900/50 transition">
+                                🎲 תמליצי לי משהו
+                            </button>
+                            <button onClick={() => sendChatMessage("בא לי משהו מתוק ובריא")} className="whitespace-nowrap px-3 py-1.5 bg-gray-100 dark:bg-white/10 text-xs rounded-full hover:bg-gray-200 dark:hover:bg-white/20 transition">
+                                🍭 משהו מתוק
+                            </button>
+                            <button onClick={() => sendChatMessage("צריך ארוחת צהריים משביעה")} className="whitespace-nowrap px-3 py-1.5 bg-gray-100 dark:bg-white/10 text-xs rounded-full hover:bg-gray-200 dark:hover:bg-white/20 transition">
+                                🥘 צהריים
+                            </button>
                         </div>
-                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 italic">"{recommendation.reasoning}"</p>
-                        
-                        <div className="flex gap-2 mt-3 text-xs font-mono opacity-80">
-                            <span>🔥 {recommendation.macros.calories}</span>
-                            <span>🥩 {recommendation.macros.protein}g</span>
-                            <span>🍞 {recommendation.macros.carbs}g</span>
-                        </div>
-
-                        <div className="mt-3 pt-3 border-t border-dashed border-black/10 dark:border-white/10">
-                            <div className="flex justify-between items-center mb-1">
-                                <div className="text-xs font-bold">איך מכינים:</div>
-                                <button 
-                                    // כאן אנחנו מעבירים גם את תיאור המנה (recipe_outline)
-                                    onClick={() => handleGetRecipe(recommendation.meal_name, recommendation.recipe_outline)} 
-                                    className="text-xs text-indigo-600 underline"
-                                >
-                                    מתכון מלא
-                                </button>
-                            </div>
-                            <p className="text-xs leading-relaxed">{recommendation.recipe_outline}</p>
-                        </div>
-                    </div>
-                )}
-             </div>
-          </SectionCard>
-      </div>
+                    )}
+                    
+                    <form 
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            if (chatInput.trim() && !chatLoading) sendChatMessage(chatInput);
+                        }}
+                        className="flex gap-2"
+                    >
+                        <input 
+                            type="text" 
+                            className="flex-1 bg-gray-100 dark:bg-black/20 border border-transparent focus:bg-white dark:focus:bg-black/40 border-black/5 dark:border-white/10 rounded-full px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                            placeholder="כתוב הודעה לדיאטנית..."
+                            value={chatInput}
+                            onChange={(e) => setChatInput(e.target.value)}
+                            disabled={chatLoading}
+                        />
+                        <button 
+                            type="submit" 
+                            disabled={!chatInput.trim() || chatLoading}
+                            className="w-10 h-10 flex items-center justify-center bg-indigo-600 text-white rounded-full hover:bg-indigo-700 disabled:opacity-50 disabled:scale-95 transition-all shadow-sm shrink-0"
+                        >
+                            ➤
+                        </button>
+                    </form>
+                </div>
+            </div>
+         </div>
+      )}
 
       {/* Recipe Modal */}
       {activeRecipe && (
-          <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setActiveRecipe(null)}>
+          <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setActiveRecipe(null)}>
               <div className="bg-white dark:bg-neutral-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
                   <div className="p-4 border-b border-black/10 dark:border-white/10 flex justify-between items-center bg-gray-50 dark:bg-white/5">
                       <h3 className="font-bold text-lg">{activeRecipe.name}</h3>
@@ -706,3 +927,6 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
     </div>
   );
 }
+/* =========================
+   END SECTION 9
+   ========================= */

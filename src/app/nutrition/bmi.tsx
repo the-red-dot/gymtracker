@@ -211,14 +211,14 @@ export default function BMIWidget({
                 {currentBMI != null && (
                   <div
                     className="absolute -top-1 h-7 w-0.5 bg-foreground"
-                    style={{ left: `calc(${curPctOnGauge}% - 1px)` }}
+                    style={{ right: `calc(${curPctOnGauge}% - 1px)` }} // Changed to 'right' for RTL
                     title={`BMI נוכחי: ${currentBMI}`}
                   />
                 )}
                 {/* target pointer */}
                 <div
                   className="absolute -top-1 h-7 w-0.5 bg-black/50 dark:bg-white/60"
-                  style={{ left: `calc(${targetPctOnGauge}% - 1px)` }}
+                  style={{ right: `calc(${targetPctOnGauge}% - 1px)` }} // Changed to 'right' for RTL
                   title={`יעד: ${targetBMI}`}
                 />
               </div>

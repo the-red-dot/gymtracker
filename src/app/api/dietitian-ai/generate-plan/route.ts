@@ -8,6 +8,8 @@ export async function POST(req: Request) {
     const apiKey = customKey || process.env.GEMINI_API_KEY;
     if (!apiKey) return new Response(JSON.stringify({ error: 'No API Key' }), { status: 401 });
 
+    const isCustomKey = !!customKey;
+
     const { userProfile, preferences, favorites, logs, targets, currentDayName } = await req.json();
 
     const wakeTime = preferences?.schedule_info?.wake_up || '07:00';
@@ -75,7 +77,7 @@ export async function POST(req: Request) {
       }
     `;
 
-    return await callGeminiWithFallback(apiKey, prompt, true);
+    return await callGeminiWithFallback(apiKey, prompt, true, isCustomKey);
 
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });

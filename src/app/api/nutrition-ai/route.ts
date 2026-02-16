@@ -11,10 +11,10 @@ type Per100 = {
 
 type AiItem = {
   item: string;
-  grams: number;             // ALWAYS grams
-  amount: string;            // "<grams> גרם" for display/back-compat
-  per100: Per100;            // density per 100g
-  calories: number;          // totals for 'grams'
+  grams: number;              // ALWAYS grams
+  amount: string;             // "<grams> גרם" for display/back-compat
+  per100: Per100;             // density per 100g
+  calories: number;           // totals for 'grams'
   protein_g: number;
   carbs_g: number;
   fat_g: number;
@@ -33,12 +33,20 @@ type GeminiContent = { role?: string; parts?: GeminiPart[] };
 type GeminiCandidate = { content?: GeminiContent };
 type GeminiResponse = { candidates?: GeminiCandidate[]; [k: string]: unknown };
 
-// הגדרת סדר המודלים לפי בקשת המשתמש
-const MODELS_PRIORITY = [
-  'gemini-3-flash-preview',
-  'gemini-2.5-pro',
-  'gemini-2.5-flash'
+// --- Configuration ---
+
+// מודלים ספציפיים לפיצ'ר התזונה (כולל Gemini 3 בראש)
+// תיקון: הסרת ה-.0 משם המודל הראשון לפי בקשת המשתמש והלוגים
+const NUTRITION_MODELS = [
+  'gemini-3-flash-preview', 
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
 ];
+
+const BACKUP_MODEL = 'DeepSeek-R1-Distill-Llama-70B';
+const SAMBANOVA_BASE_URL = 'https://api.sambanova.ai/v1/chat/completions';
 
 const ALLOWED_IMAGE_MIME = new Set([
   'image/jpeg',
@@ -159,9 +167,11 @@ export async function POST(req: Request) {
     let raw: unknown = null;
     let r: Response | null = null;
 
-    for (const model of MODELS_PRIORITY) {
+    // 1. Try Gemini Models (Specific List for Nutrition)
+    for (let i = 0; i < NUTRITION_MODELS.length; i++) {
+      const model = NUTRITION_MODELS[i];
       try {
-        console.log(`Trying model: ${model}...`);
+        console.log(`[Nutrition AI] Attempt ${i + 1}/${NUTRITION_MODELS.length}: Trying ${model}...`);
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
         
         const body = {
@@ -182,30 +192,65 @@ export async function POST(req: Request) {
         });
 
         if (!r.ok) {
-            // אם יש שגיאה, זורקים שגיאה כדי לתפוס ב-catch ולהמשיך למודל הבא
             const errBody = await r.json().catch(() => ({}));
             throw new Error(`Model ${model} failed with status ${r.status}: ${JSON.stringify(errBody)}`);
         }
 
         raw = await r.json().catch<unknown>(() => ({}));
         
-        // ולידציה בסיסית שיש תוכן
+        // Validation
         if (!isRecord(raw) || !raw.candidates || !Array.isArray(raw.candidates) || raw.candidates.length === 0) {
             throw new Error(`Model ${model} returned empty/invalid structure.`);
         }
 
-        // הצלחה
+        const textOut = extractGeminiText(raw);
+        if (!safeParseJson(textOut)) throw new Error(`Model ${model} invalid JSON`);
+
+        // Success
         successfulModel = model;
+        console.log(`[Nutrition AI Success] Model ${model} worked.`);
         break; 
 
-      } catch (err) {
-        console.warn(`Attempt with ${model} failed:`, err);
+      } catch (err: any) {
+        console.warn(`[Nutrition AI Fail] Attempt with ${model} failed: ${err.message}`);
         lastError = err;
-        // ממשיכים למודל הבא בלולאה
       }
     }
 
-    // אם אחרי כל הניסיונות עדיין אין תשובה תקינה
+    // 2. Failover to SambaNova (DeepSeek)
+    // Only if user has custom key (as requested) AND all Gemini models failed.
+    if (!successfulModel) {
+      const isUserCustomKey = apiKey !== process.env.GEMINI_API_KEY;
+      
+      if (isUserCustomKey) {
+        console.log(`[Nutrition AI Critical] All Gemini models failed. Attempting Backup: ${BACKUP_MODEL} (Text Only)...`);
+        
+        try {
+          const sambaKey = process.env.SAMBANOVA_API_KEY;
+          if (!sambaKey) throw new Error('SAMBANOVA_API_KEY missing in server env');
+
+          // If request was ONLY image, we can't really do much with a text model unless text is present
+          if (!text.trim() && imagePart) {
+             throw new Error('Backup model (DeepSeek) cannot process images, and no text description was provided.');
+          }
+
+          const sambaResp = await callSambaNova(sambaKey, system, text.trim() || "Analyze the nutrition of this meal");
+          const data = await sambaResp.json();
+          // Mock structure to match Gemini parsing below
+          raw = { candidates: [{ content: { parts: [{ text: data.choices?.[0]?.message?.content }] } }] };
+          
+          successfulModel = `${BACKUP_MODEL} (Backup)`;
+          console.log(`[Nutrition AI Backup Success] ${BACKUP_MODEL} saved the day!`);
+
+        } catch (sambaErr: any) {
+          console.error(`[Nutrition AI Backup Fail] ${sambaErr.message}`);
+          lastError = sambaErr;
+        }
+      } else {
+          console.log(`[Nutrition AI Backup Skipped] User is using system key, no backup provided.`);
+      }
+    }
+
     if (!successfulModel || !raw) {
        return j({ 
          error: 'All AI models failed', 
@@ -217,7 +262,6 @@ export async function POST(req: Request) {
     const parsedUnknown = safeParseJson(textOut);
     
     if (!parsedUnknown) {
-        // מקרה קצה: המודל החזיר תשובה טכנית תקינה אבל התוכן לא JSON
         return j({ error: 'model returned empty or invalid JSON', raw: textOut, model: successfulModel }, 502);
     }
 
@@ -246,7 +290,6 @@ export async function POST(req: Request) {
 
     const out: AiResponse = { items, totals };
     
-    // החזרת ה-Response עם כותרת שמציינת באיזה מודל השתמשנו (לצורכי דיבוג/UI)
     const finalRes = j(out, 200);
     finalRes.headers.set('x-model-used', successfulModel);
     return finalRes;
@@ -288,7 +331,8 @@ function round2(n: number): number {
 function safeParseJson(s: unknown): unknown | null {
   if (typeof s !== 'string' || !s.trim()) return null;
   try {
-    return JSON.parse(s);
+    const clean = s.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean);
   } catch {
     // try to salvage {...} from possible extra tokens
     const m = s.match(/\{[\s\S]*\}$/m);
@@ -382,7 +426,6 @@ function coerceItem(raw: unknown): AiItem {
   };
 }
 
-/* ---- utils ---- */
 function toBase64(ab: ArrayBuffer): string {
   let binary = '';
   const bytes = new Uint8Array(ab);
@@ -391,4 +434,32 @@ function toBase64(ab: ArrayBuffer): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
   return btoa(binary);
+}
+
+// Backup Call Implementation
+async function callSambaNova(apiKey: string, system: string, prompt: string) {
+  const body = {
+    model: BACKUP_MODEL,
+    messages: [
+      { role: "system", content: system + "\nOutput ONLY valid JSON." },
+      { role: "user", content: prompt }
+    ],
+    temperature: 0.1,
+  };
+
+  const res = await fetch(SAMBANOVA_BASE_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`SambaNova API Error: ${err}`);
+  }
+  
+  return res;
 }

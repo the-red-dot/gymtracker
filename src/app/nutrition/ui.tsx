@@ -1,3 +1,5 @@
+// gym-tracker-app\src\app\nutrition\ui.tsx
+
 'use client';
 
 import { useState, useEffect, useRef } from 'react';

@@ -1,22 +1,12 @@
 // src/app/api/workout-ai/route.ts
 export const runtime = 'nodejs';
 
-const MODEL = 'gemini-2.5-flash-lite';
+import { callGeminiWithFallback } from '@/lib/ai-client';
 
 type EquipmentItem = {
   id: number;
   name: string;
   body_area: string;
-};
-
-type WorkoutPlanResponse = {
-  tabs: {
-    name: string;
-    emoji: string;
-    equipment_ids: number[];
-    reasoning?: string;
-  }[];
-  summary: string;
 };
 
 export async function POST(req: Request) {
@@ -29,6 +19,7 @@ export async function POST(req: Request) {
     }
 
     const { userRequest, inventory, mode, currentRoutine } = await req.json();
+    const isCustomKey = !!customKey;
 
     // Default mode is 'generate'
     const isRefresh = mode === 'refresh';
@@ -70,7 +61,8 @@ export async function POST(req: Request) {
         { "summary": "HTML string..." }
         `;
 
-        return await callGemini(apiKey, systemPrompt);
+        const response = await callGeminiWithFallback(apiKey, systemPrompt, true, isCustomKey);
+        return response;
     }
 
     // --- MODE 2: GENERATE (Create new routine) ---
@@ -153,43 +145,11 @@ export async function POST(req: Request) {
       **Output:** JSON only. No markdown fences.
     `;
 
-    return await callGemini(apiKey, systemPrompt);
+    const response = await callGeminiWithFallback(apiKey, systemPrompt, true, isCustomKey);
+    return response;
 
   } catch (error: any) {
     console.error('AI Workout Plan Error:', error);
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
-}
-
-// Helper to call Gemini and parse JSON
-async function callGemini(apiKey: string, prompt: string) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseMimeType: "application/json"
-        }
-      })
-    });
-
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error?.message || 'Gemini API Error');
-    }
-
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    
-    if (!text) {
-      throw new Error('Empty response from AI');
-    }
-
-    const cleanJson = text.replace(/```json|```/g, '').trim();
-    const json = JSON.parse(cleanJson);
-
-    return new Response(JSON.stringify(json), { status: 200 });
 }

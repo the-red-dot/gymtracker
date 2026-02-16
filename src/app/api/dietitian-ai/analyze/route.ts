@@ -9,6 +9,8 @@ export async function POST(req: Request) {
     const apiKey = customKey || process.env.GEMINI_API_KEY;
     if (!apiKey) return new Response(JSON.stringify({ error: 'No API Key' }), { status: 401 });
 
+    const isCustomKey = !!customKey;
+
     // קבלת הנתונים המורחבים מהקליינט
     const { 
       userProfile, 
@@ -165,7 +167,7 @@ export async function POST(req: Request) {
       `}
     `;
 
-    return await callGeminiWithFallback(apiKey, prompt, false);
+    return await callGeminiWithFallback(apiKey, prompt, false, isCustomKey);
 
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });

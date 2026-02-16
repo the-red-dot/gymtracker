@@ -1,5 +1,9 @@
 // src/app/api/coach-weekly/route.ts
+// Updated to use the central AI client for proper fallback handling
+
 export const runtime = 'edge';
+
+import { callGeminiWithFallback } from '@/lib/ai-client';
 
 /* =========================
    Types
@@ -41,20 +45,6 @@ type WeeklyPayload = {
 
 type AiSections = Record<string, string | undefined>;
 
-/** Minimal shape for Gemini response (we only need text parts). */
-type GeminiPart = { text?: string } & Record<string, unknown>;
-type GeminiContent = { parts?: GeminiPart[] } & Record<string, unknown>;
-type GeminiCandidate = { content?: GeminiContent } & Record<string, unknown>;
-type GeminiResponse = {
-  candidates?: GeminiCandidate[];
-  error?: { message?: string; code?: number } & Record<string, unknown>;
-} & Record<string, unknown>;
-
-/* =========================
-   Constants
-   ========================= */
-const MODEL = 'gemini-2.5-flash-lite';
-
 /* =========================
    Helpers (type guards & utils)
    ========================= */
@@ -73,21 +63,10 @@ function isString(v: unknown): v is string {
   return typeof v === 'string';
 }
 
-function firstTextFromGemini(resp: unknown): string {
-  const r = resp as GeminiResponse;
-  const parts = r?.candidates?.[0]?.content?.parts;
-  if (Array.isArray(parts)) {
-    const p = parts.find((pt) => isString((pt as GeminiPart).text)) as GeminiPart | undefined;
-    if (p?.text) return p.text;
-  }
-  return '';
-}
-
 function safeParseJSON(input: string): unknown | null {
   try {
     return JSON.parse(input);
   } catch {
-    // Try to extract the last JSON object in the string
     const match = String(input).match(/\{[\s\S]*\}$/m);
     if (match) {
       try {
@@ -105,8 +84,11 @@ function safeParseJSON(input: string): unknown | null {
    ========================= */
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const customKey = req.headers.get('x-custom-api-key');
+    const apiKey = customKey || process.env.GEMINI_API_KEY;
     if (!apiKey) return jsonResponse({ error: 'GEMINI_API_KEY is not set' }, 500);
+
+    const isCustomKey = !!customKey; // Check if user provided their own key
 
     const payloadUnknown = await req.json();
     const payload = payloadUnknown as WeeklyPayload;
@@ -140,80 +122,53 @@ export async function POST(req: Request) {
       section_keys: payload.section_keys,
     });
 
-    const body = {
-      systemInstruction: { role: 'system', parts: [{ text: system }] },
-      contents: [{ role: 'user', parts: [{ text: `DATA:\n${dataBlock}\n\nהחזר רק {"sections": {...}}.` }] }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        temperature: 0.35,
-        topP: 0.9,
-        candidateCount: 1,
-        maxOutputTokens: 400,
-      },
-    };
+    const prompt = `DATA:\n${dataBlock}\n\n${system}\n\nהחזר רק {"sections": {...}}.`;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-
-    let raw: unknown = null;
-    try {
-      raw = await r.json();
-    } catch {
-      raw = null;
-    }
-
-    if (!r.ok) {
-      const detail = isRecord(raw) && raw.error ? raw.error : raw;
-      return jsonResponse({ error: 'Gemini API error', detail }, r.status);
-    }
-
-    const textOut = firstTextFromGemini(raw);
-    const parsed = safeParseJSON(textOut);
-
-    // Root can be either { sections: { ... } } or directly { key: "..." }
+    // Use central client with fallback logic
+    const aiRes = await callGeminiWithFallback(apiKey, prompt, true, isCustomKey);
+    const aiData = await aiRes.json();
+    
+    // Logic to parse potential variations (if lib didn't fully clean up or if structure differs)
     let root: Record<string, unknown> | null = null;
-    if (isRecord(parsed)) {
-      if (isRecord(parsed.sections)) {
-        root = parsed.sections as Record<string, unknown>;
+    
+    // aiData might be the direct object or contain { result: string } if handled by legacy logic, 
+    // but callGeminiWithFallback parses JSON when jsonMode=true.
+    // However, if the model returned { sections: ... } or just { ... }, we need to handle it.
+    
+    if (isRecord(aiData)) {
+      if (isRecord(aiData.sections)) {
+        root = aiData.sections as Record<string, unknown>;
       } else {
-        root = parsed;
+        root = aiData;
       }
     }
 
-    // Fallback generator (short & non-robotic)
+    // Fallback generator (short & non-robotic) if specific keys missing
     const cw = payload.current_week;
     const fallbackShort = (k: string): string => {
       switch (k) {
         case 'nutrition_overview':
-          return `השבוע נרשמו ${Math.round(cw.totals.meals)} ארוחות. הקצב התזונתי היה מתון, עם צריכה כוללת בסך ~${Math.round(
-            cw.totals.calories,
-          )} קק"ל.`;
+          return `השבוע נרשמו ${Math.round(cw.totals.meals)} ארוחות. הקצב התזונתי היה מתון, עם צריכה כוללת בסך ~${Math.round(cw.totals.calories)} קק"ל.`;
         case 'protein':
           return cw.avgTargets?.protein_g != null
-            ? `ממוצע חלבון שבועי התקרב ל-${Math.round(cw.avgTargets.protein_g)}ג׳ ליום. המשך לשאוף ליעד — עקביות תביא תוצאות.`
-            : `צריכת החלבון הייתה יציבה — מומלץ להגדיר יעד יומי כדי לחדד את המעקב.`;
+            ? `ממוצע חלבון שבועי התקרב ל-${Math.round(cw.avgTargets.protein_g)}ג׳ ליום. המשך לשאוף ליעד.`
+            : `צריכת החלבון הייתה יציבה — מומלץ להגדיר יעד יומי.`;
         case 'calories':
           return cw.avgTargets?.calories != null
-            ? `הצריכה הקלורית הייתה סביב ${Math.round(
-                cw.avgTargets.calories,
-              )} קק"ל ליום. שמירה עקבית סביב היעד תסייע להתקדמות מתונה ובטוחה.`
-            : `מומלץ להגדיר יעד קלורי יומי כדי לעקוב אחר המאזן לאורך השבוע.`;
+            ? `הצריכה הקלורית הייתה סביב ${Math.round(cw.avgTargets.calories)} קק"ל ליום.`
+            : `מומלץ להגדיר יעד קלורי יומי.`;
         case 'training':
           return cw.totals.workouts > 0
-            ? `בוצעו ${cw.totals.workouts} אימונים (סה"כ ~${cw.totals.minutes} דק׳). שמירה על רצף תוביל לשיפור מדיד בשבועות הקרובים.`
-            : `השבוע נטול אימונים; גם הליכה קלה או אימון קצר יספקו דחיפה קטנה להתחלה.`;
+            ? `בוצעו ${cw.totals.workouts} אימונים (סה"כ ~${cw.totals.minutes} דק׳).`
+            : `השבוע נטול אימונים; גם הליכה קלה תעזור.`;
         case 'measurements': {
           const d = cw.weight?.delta;
           return typeof d === 'number' && Number.isFinite(d) && d !== 0
-            ? `שינוי משקל שבועי של ${d > 0 ? '+' : ''}${d} ק״ג. המשך לעקוב אחר היקפים ומשקל פעם–פעמיים בשבוע.`
-            : `לא זוהה שינוי מהותי במדדים השבוע — עקביות תייצר מגמה ברורה יותר.`;
+            ? `שינוי משקל שבועי של ${d > 0 ? '+' : ''}${d} ק״ג.`
+            : `לא זוהה שינוי מהותי במדדים השבוע.`;
         }
         case 'suggestions':
-          return `שמור על מה שעובד והוסף שיפור קטן אחד לשבוע: יעד חלבון ברור, שתי הליכות קצרות, או הקפדה על ארוחה מאוזנת נוספת.`;
+          return `שמור על מה שעובד והוסף שיפור קטן אחד לשבוע.`;
         default:
           return '';
       }
@@ -221,14 +176,14 @@ export async function POST(req: Request) {
 
     const sections: AiSections = {};
     for (const key of payload.section_keys) {
-      const candidate =
-        root && Object.prototype.hasOwnProperty.call(root, key) && isString(root[key] as unknown)
+      const candidate = root && Object.prototype.hasOwnProperty.call(root, key) && isString(root[key] as unknown)
           ? (root[key] as string)
           : '';
       sections[key] = candidate || fallbackShort(key);
     }
 
     return jsonResponse({ sections, updatedAt: new Date().toISOString() }, 200);
+
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'unknown error';
     return jsonResponse({ error: message }, 500);

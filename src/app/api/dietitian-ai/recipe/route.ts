@@ -8,6 +8,8 @@ export async function POST(req: Request) {
     const apiKey = customKey || process.env.GEMINI_API_KEY;
     if (!apiKey) return new Response(JSON.stringify({ error: 'No API Key' }), { status: 401 });
 
+    const isCustomKey = !!customKey;
+
     // הוספנו תמיכה לקבלת התיאור עם הכמויות המדויקות (mealDesc)
     const { mealName, mealDesc, preferences } = await req.json();
 
@@ -35,7 +37,7 @@ export async function POST(req: Request) {
       Language: Hebrew only.
     `;
 
-    return await callGeminiWithFallback(apiKey, prompt, true);
+    return await callGeminiWithFallback(apiKey, prompt, true, isCustomKey);
 
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
