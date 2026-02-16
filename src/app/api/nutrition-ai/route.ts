@@ -1,4 +1,3 @@
-// src/app/api/nutrition-ai/route.ts
 export const runtime = 'edge';
 
 /* ============================ Types ============================ */
@@ -36,7 +35,6 @@ type GeminiResponse = { candidates?: GeminiCandidate[]; [k: string]: unknown };
 // --- Configuration ---
 
 // מודלים ספציפיים לפיצ'ר התזונה (כולל Gemini 3 בראש)
-// תיקון: הסרת ה-.0 משם המודל הראשון לפי בקשת המשתמש והלוגים
 const NUTRITION_MODELS = [
   'gemini-3-flash-preview', 
   'gemini-2.5-flash',
@@ -47,6 +45,8 @@ const NUTRITION_MODELS = [
 
 const BACKUP_MODEL = 'DeepSeek-R1-Distill-Llama-70B';
 const SAMBANOVA_BASE_URL = 'https://api.sambanova.ai/v1/chat/completions';
+// הגדרת זמן המתנה מקסימלי למודל (8 שניות) - אם הוא לא עונה, עוברים מיד למודל הבא
+const MODEL_TIMEOUT_MS = 8000; 
 
 const ALLOWED_IMAGE_MIME = new Set([
   'image/jpeg',
@@ -64,10 +64,17 @@ export async function POST(req: Request) {
     const customKey = req.headers.get('x-custom-api-key');
     
     // 2. Fallback to Server Environment Variable
-    const apiKey = customKey || process.env.GEMINI_API_KEY;
+    let apiKey = customKey || process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
       return j({ error: 'No API Key provided (Server or Custom)' }, 500);
+    }
+    
+    // Sanitize API Key to prevent header errors (strip whitespace/newlines)
+    apiKey = apiKey.trim();
+    // Check for non-ASCII characters which cause "The string did not match the expected pattern" in fetch headers
+    if (/[^\x20-\x7E]/.test(apiKey)) {
+       return j({ error: 'API Key contains invalid characters (non-ASCII)' }, 400);
     }
 
     const ctype = (req.headers.get('content-type') || '').toLowerCase();
@@ -170,6 +177,10 @@ export async function POST(req: Request) {
     // 1. Try Gemini Models (Specific List for Nutrition)
     for (let i = 0; i < NUTRITION_MODELS.length; i++) {
       const model = NUTRITION_MODELS[i];
+      // Create a timeout controller for this request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
+
       try {
         console.log(`[Nutrition AI] Attempt ${i + 1}/${NUTRITION_MODELS.length}: Trying ${model}...`);
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
@@ -189,7 +200,11 @@ export async function POST(req: Request) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
+          signal: controller.signal, // Connect the abort controller
         });
+        
+        // Clear timeout as soon as we get headers back
+        clearTimeout(timeoutId);
 
         if (!r.ok) {
             const errBody = await r.json().catch(() => ({}));
@@ -212,7 +227,10 @@ export async function POST(req: Request) {
         break; 
 
       } catch (err: any) {
-        console.warn(`[Nutrition AI Fail] Attempt with ${model} failed: ${err.message}`);
+        clearTimeout(timeoutId); // Ensure timeout is cleared on error
+        const isTimeout = err.name === 'AbortError';
+        const errMsg = isTimeout ? 'Request Timed Out (Slow)' : err.message;
+        console.warn(`[Nutrition AI Fail] Attempt with ${model} failed: ${errMsg}`);
         lastError = err;
       }
     }
@@ -291,11 +309,13 @@ export async function POST(req: Request) {
     const out: AiResponse = { items, totals };
     
     const finalRes = j(out, 200);
-    finalRes.headers.set('x-model-used', successfulModel);
+    // Sanitize header value to prevent crashes
+    finalRes.headers.set('x-model-used', successfulModel.replace(/[^\x20-\x7E]/g, ''));
     return finalRes;
 
   } catch (e) {
     const msg = (e as { message?: string })?.message || 'unknown error';
+    console.error('[Nutrition AI Error]', e);
     return j({ error: msg }, 500);
   }
 }
@@ -426,7 +446,13 @@ function coerceItem(raw: unknown): AiItem {
   };
 }
 
+// Safer Base64 implementation for Edge Runtime
 function toBase64(ab: ArrayBuffer): string {
+  // Use Buffer if available (standard in modern Edge/Node envs)
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(ab).toString('base64');
+  }
+  // Fallback for strict browser-like envs without Buffer
   let binary = '';
   const bytes = new Uint8Array(ab);
   const chunk = 0x8000;
@@ -447,19 +473,29 @@ async function callSambaNova(apiKey: string, system: string, prompt: string) {
     temperature: 0.1,
   };
 
-  const res = await fetch(SAMBANOVA_BASE_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`SambaNova API Error: ${err}`);
+  try {
+    const res = await fetch(SAMBANOVA_BASE_URL, {
+        method: 'POST',
+        headers: {
+        'Authorization': `Bearer ${apiKey}`, // Ensure apiKey is clean (ASCII) before here
+        'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`SambaNova API Error: ${err}`);
+    }
+    
+    return res;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    throw error;
   }
-  
-  return res;
 }
