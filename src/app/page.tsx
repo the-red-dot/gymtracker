@@ -2,8 +2,7 @@
 'use client';
 
 /**
- * עמוד בית פשוט: ברכה + הסבר קצר + קישורי פעולה (עם אמוג'ים 😄)
- * כולל באנר "בטא" בחלק העליון ואפשרות להגדרת מפתח AI אישי.
+ * עמוד בית מעודכן: כולל מדריך צעדים (אקורדיון) להתחלה מהירה, הסברים על ה-API, והפניות לעמודים השונים.
  */
 
 import Link from 'next/link';
@@ -57,91 +56,48 @@ export default function Home() {
           ברוכים הבאים ל-GymTracker 💪
         </h1>
         <p className="text-base sm:text-lg text-gray-600 dark:text-gray-300">
-          יומן אימונים ותזונה פשוט ואמין — כדי להתמיד, לעקוב ולהרגיש בשליטה.
+          המקום שלך לעקוב, להבין ולהתמיד. בואו נעשה סדר בבלאגן.
         </p>
       </header>
 
-      {/* קישורי פעולה מהירים */}
-      <div className="flex flex-col sm:flex-row flex-wrap gap-3">
-        <Link
-          href="/workouts/start"
-          className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 bg-foreground text-background hover:opacity-90"
-        >
-          התחל/י אימון 🏋️
-        </Link>
-        <Link
-          href="/nutrition"
-          className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-        >
-          הוספת אכילה 🍽️
-        </Link>
-        <Link
-          href="/profile"
-          className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-        >
-          עדכון פרופיל/מדידות 📏
-        </Link>
-        <Link
-          href="/equipment"
-          className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-        >
-          מכשירים 🧰
-        </Link>
+      {/* --- רכיב המדריך החדש (אקורדיון) --- */}
+      <GuideSection onOpenApiKey={() => setShowKeyModal(true)} />
+
+      {/* כותרת משנית לגישה מהירה */}
+      <div className="pt-4 border-t border-black/5 dark:border-white/5">
+        <h3 className="text-lg font-semibold mb-3">גישה מהירה</h3>
+        
+        {/* קישורי פעולה מהירים */}
+        <div className="flex flex-col sm:flex-row flex-wrap gap-3">
+          <Link
+            href="/workouts/start"
+            className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 bg-foreground text-background hover:opacity-90"
+          >
+            התחל/י אימון 🏋️
+          </Link>
+          <Link
+            href="/nutrition"
+            className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+          >
+            הוספת אכילה 🍽️
+          </Link>
+          <Link
+            href="/profile"
+            className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+          >
+            עדכון פרופיל 📏
+          </Link>
+          <Link
+            href="/equipment"
+            className="inline-flex items-center justify-center rounded-md px-4 py-2 h-11 border border-black/10 dark:border-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+          >
+            מכשירים 🧰
+          </Link>
+        </div>
       </div>
 
-      {/* הסבר קצר על העמודים + כרטיסיית AI חדשה */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <FeatureCard
-          title="אימונים 🏋️"
-          href="/workouts/start"
-          points={[
-            'תיעוד אימון לפי תרגילים וסטים',
-            'שמירת משקלים וחזרות',
-            'מעקב אחר נפח וזמן אימון',
-          ]}
-        />
-        <FeatureCard
-          title="תזונה 🥗"
-          href="/nutrition"
-          points={[
-            'רישום ארוחות ומה אכלת בפועל',
-            'קלוריות וחלוקת מאקרו (חלבון/פחמימות/שומן)',
-            'אפשר להוסיף הערות לכל סעיף',
-          ]}
-        />
-        <FeatureCard
-          title="פרופיל ומדידות 📏"
-          href="/profile"
-          points={[
-            'פרטים אישיים והעדפות',
-            'מדידות היקפים/משקל לאורך זמן',
-            'יעדי חלבון/קלוריות לפי משקל/פעילות',
-          ]}
-        />
-        <FeatureCard
-          title="מכשירים 🧰"
-          href="/equipment"
-          points={[
-            'בחירת ציוד זמין עבורך',
-            'התאמת תרגילים לפי ציוד',
-            'ארגון לפי טאבים/קטגוריות',
-          ]}
-        />
-        {/* כרטיסיית הגדרות AI */}
-        <FeatureCard
-          title="הגדרות AI 🤖"
-          action={() => setShowKeyModal(true)}
-          actionLabel="הגדר מפתח"
-          points={[
-            'חיבור מפתח API אישי (Gemini)',
-            'לשימוש חופשי בפיצ׳ר זיהוי תזונה',
-            'פרטיות: נשמר מקומית בדפדפן שלך',
-          ]}
-        />
-      </div>
-
-      <footer className="pt-2 text-xs text-gray-500 dark:text-gray-400">
-        טיפ: להתחלה מהירה — היכנס/י ל״אימונים״ לפתיחת אימון חדש, או ל״תזונה״ להוספת הארוחה הבאה. 🚀
+      <footer className="pt-2 text-xs text-center text-gray-500 dark:text-gray-400">
+        טיפ: קוד ג'מיני נשמר מקומית בדפדפן או בבסיס הנתונים שלך. הפרטיות שלך חשובה לנו. 🔒
       </footer>
 
       {/* API Key Modal */}
@@ -219,47 +175,132 @@ export default function Home() {
   );
 }
 
-function FeatureCard({
-  title,
-  href,
-  action,
-  actionLabel = 'מעבר לעמוד →',
-  points,
-}: {
-  title: string;
-  href?: string;
-  action?: () => void;
-  actionLabel?: string;
-  points: string[];
-}) {
-  return (
-    <section className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background">
-      <div className="p-4 md:p-5 border-b border-black/10 dark:border-white/10 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{title}</h2>
-        {href ? (
-          <Link
-            href={href}
-            className="text-sm underline underline-offset-4 opacity-80 hover:opacity-100"
-          >
-            {actionLabel}
+// --- קומפוננטת המדריך (אקורדיון) ---
+function GuideSection({ onOpenApiKey }: { onOpenApiKey: () => void }) {
+  const [activeStep, setActiveStep] = useState<number | null>(0); // פותח את הראשון כברירת מחדל
+
+  const steps = [
+    {
+      id: 0,
+      title: '1. המנוע של המערכת (API Key) 🔑',
+      short: 'חובה להתחלה - חינמי, מאובטח ובשליטה שלך.',
+      content: (
+        <div className="space-y-3">
+          <p>
+            כדי שהאתר יוכל "לחשוב" (לנתח ארוחות, לבנות תפריטים ולהציע אימונים), הוא זקוק למפתח גישה למודל ה-AI של גוגל.
+          </p>
+          <ul className="list-disc list-inside space-y-1 opacity-90 text-sm">
+            <li><strong>למה זה חובה?</strong> בלי זה, כל הפיצ'רים החכמים יהיו מושבתים.</li>
+            <li><strong>זה עולה כסף?</strong> לא! גוגל מאפשרת להוציא מפתח לשימוש אישי בחינם.</li>
+            <li><strong>פרטיות:</strong> המפתח נשמר רק אצלך בדפדפן. תמיד אפשר למחוק אותו.</li>
+          </ul>
+          <div className="mt-2">
+            <button onClick={onOpenApiKey} className="inline-flex items-center gap-2 text-sm bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition shadow-sm">
+              🔑 לחץ להגדרת מפתח עכשיו
+            </button>
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 1,
+      title: '2. הפרופיל שלך 👤',
+      short: 'הגדרת גיל, משקל וגובה לדיוק מקסימלי.',
+      content: (
+        <div className="space-y-3">
+          <p>
+            אחרי שהגדרת את המפתח, המערכת צריכה להכיר אותך.
+          </p>
+          <p>
+            בלי גיל, גובה ומשקל, לא נוכל לחשב שריפת קלוריות או להתאים לך תפריט.
+            <br/>
+            זה לוקח דקה וזה הבסיס להכל.
+          </p>
+          <Link href="/profile" className="text-sm bg-black/5 dark:bg-white/10 px-3 py-1.5 rounded inline-block mt-1 font-medium hover:bg-black/10 dark:hover:bg-white/20 transition">
+            מעבר לעדכון פרופיל &larr;
           </Link>
-        ) : action ? (
-          <button
-            onClick={action}
-            className="text-sm underline underline-offset-4 opacity-80 hover:opacity-100 text-blue-600 dark:text-blue-400"
-          >
-            {actionLabel}
-          </button>
-        ) : null}
-      </div>
-      <div className="p-4 md:p-5 text-sm space-y-1">
-        {points.map((p, i) => (
-          <div key={i} className="flex items-start gap-2">
-            <span className="mt-0.5">•</span>
-            <span>{p}</span>
+        </div>
+      )
+    },
+    {
+      id: 2,
+      title: '3. גאונות התזונה 🥗',
+      short: 'ניתוח ארוחות, סקירות יומיות ובניית תפריט.',
+      content: (
+        <div className="space-y-3">
+          <p>
+            עמוד התזונה הוא ה"מוח" של האתר. הנה מה שאפשר לעשות שם:
+          </p>
+          <ul className="list-disc list-inside space-y-1 opacity-90 text-sm">
+            <li><strong>תיעוד מהיר:</strong> פשוט כתבו "חביתה וקוטג'" או העלו תמונה – ה-AI יחשב לבד קלוריות וחלבון.</li>
+            <li><strong>סקירות חכמות:</strong> בלחיצת כפתור, תקבלו ניתוח יומי או שבועי: האם עמדתם ביעדים? מה חסר?</li>
+            <li><strong>בניית תפריט:</strong> ה-AI יכול לבנות לכם תוכנית אכילה מלאה המותאמת להעדפות שלכם.</li>
+          </ul>
+          <Link href="/nutrition" className="text-sm bg-black/5 dark:bg-white/10 px-3 py-1.5 rounded inline-block mt-1 font-medium hover:bg-black/10 dark:hover:bg-white/20 transition">
+            מעבר לתזונה &larr;
+          </Link>
+        </div>
+      )
+    },
+    {
+      id: 3,
+      title: '4. אימונים חכמים 🏋️',
+      short: 'בחירת מכשירים, בניית תוכנית ומעקב זמן אמת.',
+      content: (
+        <div className="space-y-3">
+          <p>
+            כדי להתאמן יעיל, לא צריך לנחש:
+          </p>
+          <ol className="list-decimal list-inside space-y-2 opacity-90 text-sm">
+            <li><strong>הגדרת ציוד:</strong> כנסו ל"מכשירים" וסמנו מה יש לכם (משקולות, מכונות, גומיות).</li>
+            <li><strong>בניית תוכנית AI:</strong> בקשו מהמאמן הווירטואלי לבנות לכם תוכנית (למשל "AB" או "פול בודי") המבוססת <u>רק</u> על הציוד שלכם.</li>
+            <li><strong>בזמן אימון:</strong> לחצו על "התחל אימון", הפעילו את השעון ⏱️, ותעדו כל סט. בסוף לחצו על "סיים אימון" כדי לשמור היסטוריה.</li>
+          </ol>
+          <Link href="/equipment" className="text-sm bg-black/5 dark:bg-white/10 px-3 py-1.5 rounded inline-block mt-1 font-medium hover:bg-black/10 dark:hover:bg-white/20 transition">
+            הגדרת מכשירים &larr;
+          </Link>
+        </div>
+      )
+    }
+  ];
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-bold opacity-90">איך מתחילים? 🚀</h2>
+      <div className="grid gap-3">
+        {steps.map((step) => (
+          <div key={step.id} className={`rounded-xl border transition-all duration-300 overflow-hidden ${
+            activeStep === step.id 
+              ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/10 shadow-md ring-1 ring-indigo-500/20' 
+              : 'border-black/5 dark:border-white/5 bg-white dark:bg-white/5 hover:border-black/10'
+          }`}>
+            <button 
+              onClick={() => setActiveStep(activeStep === step.id ? null : step.id)}
+              className="w-full text-right p-4 flex items-center justify-between gap-4"
+            >
+              <div>
+                <div className={`font-bold text-base ${activeStep === step.id ? 'text-indigo-700 dark:text-indigo-300' : ''}`}>
+                  {step.title}
+                </div>
+                <div className="text-xs opacity-70 mt-0.5">{step.short}</div>
+              </div>
+              <div className={`transition-transform duration-300 opacity-50 ${activeStep === step.id ? 'rotate-180' : ''}`}>
+                ▼
+              </div>
+            </button>
+            
+            <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${activeStep === step.id ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+              <div className="overflow-hidden">
+                <div className="p-4 pt-0 text-sm leading-relaxed opacity-90 border-t border-black/5 dark:border-white/5 mt-2">
+                  <div className="pt-3">
+                    {step.content}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         ))}
       </div>
-    </section>
+    </div>
   );
 }
