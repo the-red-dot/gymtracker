@@ -121,9 +121,16 @@ export default function StartWorkoutPage() {
   // Timer Logic (With Auto-Pause support)
   const [elapsed, setElapsed] = useState(0); // seconds
   useEffect(() => {
-    if (!startedAt || endedAt) return;
+    if (!startedAt) return;
     
     const startMs = +new Date(startedAt);
+
+    // If workout ended, show final duration constant
+    if (endedAt) {
+        const endMs = +new Date(endedAt);
+        setElapsed(Math.max(0, Math.floor((endMs - startMs) / 1000)));
+        return;
+    }
     
     // If auto-paused, freeze time at the moment pause started (lastActivity + 30 mins)
     if (isAutoPaused) {
@@ -147,19 +154,20 @@ export default function StartWorkoutPage() {
         const now = Date.now();
         const diff = now - lastActivity;
         const THIRTY_MIN = 30 * 60 * 1000;
+        const SIXTY_MIN = 60 * 60 * 1000;
 
-        // 1. Auto-Pause after 30 mins inactivity
-        if (!isAutoPaused && diff > THIRTY_MIN) {
-            setIsAutoPaused(true);
-        }
-
-        // 2. Auto-Finish after another 30 mins (Total 60 mins inactivity)
-        if (isAutoPaused && diff > THIRTY_MIN * 2) {
+        // 1. Critical: Check if we passed the 60 min mark total inactivity (auto-finish)
+        // We check this first to handle cases where the app was in background for > 1 hour
+        if (diff > SIXTY_MIN) {
             // Finish time should be when it effectively paused (lastActivity + 30m)
             const autoEndTime = new Date(lastActivity + THIRTY_MIN).toISOString();
-            finishWorkout(autoEndTime);
+            finishWorkout(autoEndTime, true); // true = automatic finish
         }
-    }, 10000); // Check every 10 seconds
+        // 2. Auto-Pause after 30 mins inactivity
+        else if (!isAutoPaused && diff > THIRTY_MIN) {
+            setIsAutoPaused(true);
+        }
+    }, 5000); // Check every 5 seconds
 
     return () => clearInterval(checkInterval);
   }, [workoutId, endedAt, lastActivity, isAutoPaused]);
@@ -532,15 +540,27 @@ export default function StartWorkoutPage() {
   };
 
   // Optional customEndTime allows finishing workout at a past timestamp (for auto-finish)
-  const finishWorkout = async (customEndTime?: string) => {
+  // isAuto: indicates if the system called this (prevents resetting inactivity timer)
+  const finishWorkout = async (customEndTime?: string, isAuto = false) => {
     if (!workoutId) return;
     
-    registerActivity(); 
+    // Only register activity if it's a manual user action
+    if (!isAuto) {
+        registerActivity();
+    }
 
     const endIso = customEndTime || new Date().toISOString();
     const { error } = await supabase.from('workouts').update({ ended_at: endIso }).eq('id', workoutId);
     if (error) { setError(error.message); return; }
+    
     setEndedAt(endIso);
+    
+    // Immediately update elapsed time to reflect the actual finish time (especially for auto-finish)
+    if (startedAt) {
+        const startMs = +new Date(startedAt);
+        const endMs = +new Date(endIso);
+        setElapsed(Math.max(0, Math.floor((endMs - startMs) / 1000)));
+    }
   };
 
   // ---- Deep cancel without navigation (fix 404) ----
@@ -797,7 +817,7 @@ export default function StartWorkoutPage() {
                <div className="p-4 border-b border-black/10 dark:border-white/10 flex justify-between items-center bg-gray-50 dark:bg-white/5 shrink-0">
                   <div className="flex flex-col">
                       <h3 className="font-bold text-lg leading-tight">
-                         {activeMobileEx.equip.name_he || activeMobileEx.equip.name_en}
+                          {activeMobileEx.equip.name_he || activeMobileEx.equip.name_en}
                       </h3>
                       <span className="text-xs opacity-60">
                         {activeMobileEx.sets.length} סטים בוצעו
@@ -807,7 +827,7 @@ export default function StartWorkoutPage() {
                      onClick={() => setMobileActiveIndex(null)} 
                      className="bg-gray-200 dark:bg-white/10 text-gray-700 dark:text-white px-4 py-2 rounded-lg text-sm font-medium"
                   >
-                     סגור
+                      סגור
                   </button>
                </div>
 
@@ -816,75 +836,75 @@ export default function StartWorkoutPage() {
                   
                   {/* Image & History Toggle - CHANGED */}
                   <div className="flex flex-col gap-4 items-center">
-                     {/* Image Container - CENTERED AND LARGER */}
-                     <div className="w-full h-48 sm:h-56 rounded-xl overflow-hidden border border-black/10 dark:border-white/10 bg-white shadow-sm relative group">
+                      {/* Image Container - CENTERED AND LARGER */}
+                      <div className="w-full h-48 sm:h-56 rounded-xl overflow-hidden border border-black/10 dark:border-white/10 bg-white shadow-sm relative group">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img 
                             src={activeMobileEx.equip.image_url || PLACEHOLDER_IMG} 
                             className="w-full h-full object-contain p-2" 
                             alt="equipment" 
                         />
-                     </div>
+                      </div>
 
-                     {/* History Section - BUTTON WIDTH ADJUSTED */}
-                     <div className="w-full">
-                        <button
-                           onClick={async () => {
-                             registerActivity();
-                             const equipId = activeMobileEx.equipment_id;
-                             const open = !expanded[equipId];
-                             setExpanded((m) => ({ ...m, [equipId]: open }));
-                             if (open && historyByEquip[equipId] == null) {
-                               await loadHistory(equipId);
-                             }
-                           }}
-                           className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 text-sm font-bold transition-colors hover:bg-indigo-100 dark:hover:bg-indigo-900/30"
-                        >
-                           <span>{expanded[activeMobileEx.equipment_id] ? 'הסתר היסטוריה' : 'הצג היסטוריה אחרונה'}</span>
-                           <span>🕒</span>
-                        </button>
+                      {/* History Section - BUTTON WIDTH ADJUSTED */}
+                      <div className="w-full">
+                         <button
+                            onClick={async () => {
+                              registerActivity();
+                              const equipId = activeMobileEx.equipment_id;
+                              const open = !expanded[equipId];
+                              setExpanded((m) => ({ ...m, [equipId]: open }));
+                              if (open && historyByEquip[equipId] == null) {
+                                await loadHistory(equipId);
+                              }
+                            }}
+                            className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 text-sm font-bold transition-colors hover:bg-indigo-100 dark:hover:bg-indigo-900/30"
+                         >
+                            <span>{expanded[activeMobileEx.equipment_id] ? 'הסתר היסטוריה' : 'הצג היסטוריה אחרונה'}</span>
+                            <span>🕒</span>
+                         </button>
 
-                        {/* History container - REMOVED SCROLL, ADDED CONDITIONAL COLUMNS */}
-                        {expanded[activeMobileEx.equipment_id] && (
-                           <div className="mt-3 bg-white dark:bg-black/20 border border-black/5 dark:border-white/5 rounded-xl overflow-hidden shadow-sm animate-in fade-in slide-in-from-top-2 duration-200">
-                              <div className="p-0">
-                                  {historyBusy[activeMobileEx.equipment_id] ? (
-                                    <div className="p-4 text-center text-sm opacity-60">טוען נתונים...</div>
-                                  ) : (historyByEquip[activeMobileEx.equipment_id]?.length ?? 0) === 0 ? (
-                                    <div className="p-4 text-center text-sm opacity-60">אין היסטוריה לתרגיל זה</div>
-                                  ) : (
-                                    // Removed max-h and overflow-y to show full list
-                                    <AggregatedHistoryByWeight 
-                                        rows={historyByEquip[activeMobileEx.equipment_id]!} 
-                                        fmtDate={fmtDate}
-                                        isCardio={isCardio}
-                                    />
-                                  )}
-                              </div>
-                           </div>
-                        )}
-                     </div>
+                         {/* History container - REMOVED SCROLL, ADDED CONDITIONAL COLUMNS */}
+                         {expanded[activeMobileEx.equipment_id] && (
+                            <div className="mt-3 bg-white dark:bg-black/20 border border-black/5 dark:border-white/5 rounded-xl overflow-hidden shadow-sm animate-in fade-in slide-in-from-top-2 duration-200">
+                               <div className="p-0">
+                                   {historyBusy[activeMobileEx.equipment_id] ? (
+                                     <div className="p-4 text-center text-sm opacity-60">טוען נתונים...</div>
+                                   ) : (historyByEquip[activeMobileEx.equipment_id]?.length ?? 0) === 0 ? (
+                                     <div className="p-4 text-center text-sm opacity-60">אין היסטוריה לתרגיל זה</div>
+                                   ) : (
+                                     // Removed max-h and overflow-y to show full list
+                                     <AggregatedHistoryByWeight 
+                                         rows={historyByEquip[activeMobileEx.equipment_id]!} 
+                                         fmtDate={fmtDate}
+                                         isCardio={isCardio}
+                                     />
+                                   )}
+                               </div>
+                            </div>
+                         )}
+                      </div>
                   </div>
 
                   {/* Input Form */}
                   <div className="bg-white dark:bg-neutral-800 p-5 rounded-xl border border-black/5 dark:border-white/5 shadow-sm ring-1 ring-black/5">
-                     <div className="flex items-center justify-between mb-4">
-                        <h4 className="font-bold text-base flex items-center gap-2">
+                      <div className="flex items-center justify-between mb-4">
+                         <h4 className="font-bold text-base flex items-center gap-2">
                             <span className="w-1 h-5 bg-indigo-500 rounded-full"></span>
                             הוספת סט {activeMobileEx.sets.length + 1}
-                        </h4>
-                        <div className="text-xs text-gray-500 font-mono">
+                         </h4>
+                         <div className="text-xs text-gray-500 font-mono">
                             {newSetByEx[activeMobileEx.id]?.weight ? `${newSetByEx[activeMobileEx.id]?.weight}kg` : ''}
-                        </div>
-                     </div>
-                     
-                     <form
+                         </div>
+                      </div>
+                      
+                      <form
                         onSubmit={async (e) => {
                            e.preventDefault();
                            await addSet(activeMobileEx.id);
                         }}
                         className="space-y-4"
-                     >
+                      >
                         <div className="grid grid-cols-2 gap-4">
                             {!isCardio && (
                                 <div className="space-y-1.5">
@@ -950,65 +970,65 @@ export default function StartWorkoutPage() {
                               ⚠️ האימון יתחיל אוטומטית עם הוספת הסט
                            </p>
                         )}
-                     </form>
+                      </form>
                   </div>
 
                   {/* Sets List */}
                   {activeMobileEx.sets.length > 0 && (
-                     <div className="space-y-3">
-                        <div className="flex items-center justify-between px-1">
+                      <div className="space-y-3">
+                         <div className="flex items-center justify-between px-1">
                             <h4 className="font-bold text-sm opacity-80">סטים שבוצעו ({activeMobileEx.sets.length})</h4>
                             <span className="text-xs opacity-50">האחרון למעלה</span>
-                        </div>
-                        <div className="space-y-2">
-                           {[...activeMobileEx.sets].reverse().map((s, idx) => (
-                              <div key={s.id} className="flex justify-between items-center p-3.5 bg-white dark:bg-neutral-800 rounded-xl border border-black/5 dark:border-white/5 shadow-sm">
-                                 <div className="flex items-center gap-4">
-                                    <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-sm font-bold font-mono">
-                                       {s.set_index}
-                                    </div>
-                                    
-                                    {!isCardio && (
+                         </div>
+                         <div className="space-y-2">
+                            {[...activeMobileEx.sets].reverse().map((s, idx) => (
+                               <div key={s.id} className="flex justify-between items-center p-3.5 bg-white dark:bg-neutral-800 rounded-xl border border-black/5 dark:border-white/5 shadow-sm">
+                                  <div className="flex items-center gap-4">
+                                     <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-sm font-bold font-mono">
+                                        {s.set_index}
+                                     </div>
+                                     
+                                     {!isCardio && (
                                         <div className="flex flex-col">
                                             <div className="flex items-baseline gap-1">
                                                 <span className="text-xl font-bold tabular-nums">{fmtNum(s.weight_kg)}</span>
                                                 <span className="text-xs opacity-60 font-medium">ק"ג</span>
                                             </div>
                                         </div>
-                                    )}
+                                     )}
 
-                                    {!isCardio && <div className="w-px h-8 bg-black/5 dark:bg-white/10 mx-1"></div>}
-                                    
-                                    <div className="flex flex-col">
-                                       <div className="flex items-baseline gap-1">
-                                            <span className="text-xl font-bold tabular-nums">{fmtNum(s.reps)}</span>
-                                            <span className="text-xs opacity-60 font-medium">חזרות</span>
-                                       </div>
-                                    </div>
+                                     {!isCardio && <div className="w-px h-8 bg-black/5 dark:bg-white/10 mx-1"></div>}
+                                     
+                                     <div className="flex flex-col">
+                                         <div className="flex items-baseline gap-1">
+                                             <span className="text-xl font-bold tabular-nums">{fmtNum(s.reps)}</span>
+                                             <span className="text-xs opacity-60 font-medium">חזרות</span>
+                                         </div>
+                                     </div>
 
-                                    {isCardio && s.distance_m != null && (
-                                        <>
-                                            <div className="w-px h-8 bg-black/5 dark:bg-white/10 mx-1"></div>
-                                            <div className="flex flex-col">
-                                                <div className="flex items-baseline gap-1">
-                                                    <span className="text-xl font-bold tabular-nums">{fmtNum(s.distance_m)}</span>
-                                                    <span className="text-xs opacity-60 font-medium">מ'</span>
-                                                </div>
-                                            </div>
-                                        </>
-                                    )}
-                                 </div>
-                                 <button 
-                                    onClick={() => removeSet(activeMobileEx.id, s.id)}
-                                    className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-colors"
-                                    aria-label="מחק סט"
-                                 >
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                                 </button>
-                              </div>
-                           ))}
-                        </div>
-                     </div>
+                                     {isCardio && s.distance_m != null && (
+                                         <>
+                                             <div className="w-px h-8 bg-black/5 dark:bg-white/10 mx-1"></div>
+                                             <div className="flex flex-col">
+                                                 <div className="flex items-baseline gap-1">
+                                                     <span className="text-xl font-bold tabular-nums">{fmtNum(s.distance_m)}</span>
+                                                     <span className="text-xs opacity-60 font-medium">מ'</span>
+                                                 </div>
+                                             </div>
+                                         </>
+                                     )}
+                                  </div>
+                                  <button 
+                                     onClick={() => removeSet(activeMobileEx.id, s.id)}
+                                     className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-colors"
+                                     aria-label="מחק סט"
+                                  >
+                                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                  </button>
+                               </div>
+                            ))}
+                         </div>
+                      </div>
                   )}
 
                </div>

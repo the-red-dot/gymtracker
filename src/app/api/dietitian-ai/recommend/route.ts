@@ -1,6 +1,7 @@
-// src/app/api/dietitian-ai/recommend/route.ts
+// gym-tracker-app\src\app\api\dietitian-ai\recommend\route.ts
 
 import { callGeminiWithFallback } from '@/lib/ai-client';
+import { getDietitianContext } from '@/lib/aiDaily';
 
 export const runtime = 'nodejs';
 
@@ -12,69 +13,98 @@ export async function POST(req: Request) {
 
     const isCustomKey = !!customKey;
 
-    const { userProfile, preferences, currentContext, favorites, history } = await req.json();
+    const { userProfile, preferences, currentContext: clientContext, favorites, history, userId } = await req.json();
+
+    // --- שליפת נתונים מה-DB (עוקף RLS בעזרת Service Key) ---
+    let dbContext = null;
+    if (userId) {
+      try {
+        dbContext = await getDietitianContext(userId);
+      } catch (e) {
+        console.error("Error fetching dietitian context:", e);
+      }
+    }
+
+    // מיזוג נתונים: עדיפות ל-DB > קליינט > 0
+    const eatenCals = dbContext?.today?.calories ?? clientContext?.eatenCalories ?? 0;
+    const eatenProt = dbContext?.today?.protein ?? clientContext?.eatenProtein ?? 0;
+    const eatenCarbs = dbContext?.today?.carbs ?? 0;
+    const eatenFats = dbContext?.today?.fats ?? 0;
+
+    const targetCals = dbContext?.targets?.calories || clientContext?.targetCalories || 0;
+    const targetProt = dbContext?.targets?.protein || clientContext?.targetProtein || 0;
+    const targetCarbs = dbContext?.targets?.carbs || 0;
+    const targetFats = dbContext?.targets?.fats || 0;
+
+    // חישוב יתרות
+    const remCals = parseFloat((targetCals - eatenCals).toFixed(1));
+    const remProt = parseFloat((targetProt - eatenProt).toFixed(1));
+    const remCarbs = parseFloat((targetCarbs - eatenCarbs).toFixed(1));
+    const remFats = parseFloat((targetFats - eatenFats).toFixed(1));
 
     const hebrewGender = userProfile?.gender === 'female' ? 'נקבה' : 'זכר';
     const favStr = favorites?.map((f: any) => f.meal_name).join(', ') || "None";
     
-    // קריאת הדוח השבועי גם לטובת המלצות בזמן אמת
     const weeklyReviewHtml = preferences?.last_weekly_analysis_html || 'No recent weekly review available.';
+    const currentTime = new Date().toLocaleTimeString('he-IL', {hour: '2-digit', minute:'2-digit', timeZone: 'Asia/Jerusalem'});
 
-    // בניית היסטוריית השיחה
     const conversationHistory = history?.map((msg: any) => 
         `${msg.role === 'user' ? 'User' : 'Dietitian'}: ${msg.content}`
     ).join('\n') || 'No previous conversation.';
 
     const prompt = `
-      You are a friendly, professional real-time clinical dietitian in a chat.
+      You are a specialized Clinical Dietitian AI.
+      Language: Hebrew (he-IL) ONLY.
+      Tone: Professional, direct, concise, yet encouraging.
+
+      **REAL-TIME STATUS (User: ${hebrewGender}, Time: ${currentTime}):**
+      - Calories: ${eatenCals} / ${targetCals} (Left: ${remCals})
+      - Protein: ${eatenProt}g / ${targetProt}g (Left: ${remProt}g)
+      - Carbs: ${eatenCarbs}g / ${targetCarbs}g (Left: ${remCarbs}g)
+      - Fat: ${eatenFats}g / ${targetFats}g (Left: ${remFats}g)
       
-      **User Context:**
-      - Gender: ${hebrewGender} (Address strictly as ${hebrewGender}).
-      - Current Time: ${currentContext?.time}
-      - Eaten Today: ${currentContext?.eatenCalories} kcal, ${currentContext?.eatenProtein}g protein.
-      - Target: ${currentContext?.targetCalories} kcal, ${currentContext?.targetProtein}g protein.
+      **Context:**
       - Favorites: ${favStr}
       - Preferences: ${preferences?.cooking_preference}, ${JSON.stringify(preferences?.dietary_preferences)}
-      
-      **Dietitian's Weekly Review (CRITICAL):**
-      ${weeklyReviewHtml}
+      - Weekly Review Insight: ${weeklyReviewHtml.replace(/<[^>]*>?/gm, '')}
       
       **Conversation History:**
       ${conversationHistory}
       
-      **Goal:**
-      Help the user decide what to eat RIGHT NOW.
-      
-      **Process & Rules:**
-      1. **Analysis:** First, analyze the user's habits, time of day, and remaining macros. Check the Weekly Review for deficiencies (e.g., "missing greens").
-      2. **Conversation:** Do NOT immediately give a final recipe if this is the start of the conversation. First, suggest a direction based on their habits (e.g., "Hi! I see you need more protein. How about something with eggs or tuna? Do you have that at home?").
-      3. **Inventory Check:** ASK if they have the main ingredients before finalizing.
-      4. **Portion Control (EXTREMELY IMPORTANT):** - When you DO recommend a meal, you MUST calculate for a **SINGLE SERVING (1 Person)**.
-         - Do NOT use raw package sizes (e.g., "500g meat" is WRONG for a single meal).
-         - Examples of correct single servings:
-           - "Blintzes with meat": 2 units (approx 100g total) + 50g meat filling. Total ~150g. NOT 500g.
-           - "Schnitzel": 1 unit (~150g chicken breast).
-           - "Pasta": 100g cooked pasta + 100g sauce.
-      5. **Finalize:** ONLY when the user agrees or asks for the recipe/final plan, output the "recommendation" type. Otherwise, use "chat" type.
+      **CRITICAL INSTRUCTIONS FOR LOGIC:**
+      1. **Time Awareness:** Check the Current Time (${currentTime}).
+         - If it is morning/noon, DO NOT try to close the entire remaining gap in one meal. Distribute macros logically for the remaining meals of the day.
+         - If it is late night, recommend something light or exactly what fits the remaining gap.
+         
+      2. **"Can I eat X?" Scenarios (Trade-off Analysis):**
+         - If the user asks about specific food (e.g., Pizza, Burger, Cake), calculate its estimated impact on the *remaining* budget.
+         - Explain the trade-off clearly. Example: "Yes, you can eat a slice of pizza (~300kcal, 35g carbs), BUT it will leave you with very few carbs for dinner, so your next meal will have to be mostly protein and veggies."
+         - Give the user the choice based on this data.
+
+      3. **Conciseness:** Keep answers short. Avoid long generic intros. Get to the point.
+
+      4. **Inventory Check:** Before giving a final recipe, briefly ask if they have the main ingredients (e.g., "Do you have eggs or tuna available?").
+
+      5. **Portion Control:** When recommending a meal, define EXACT Single Serving quantities (e.g. "150g chicken", not "a package of chicken").
 
       **Output Format (JSON Only):**
       
-      If chatting/asking questions:
+      If chatting/analyzing/asking:
       {
         "type": "chat",
-        "message": "Hebrew text response here..."
+        "message": "Hebrew text here. Short and focused."
       }
 
-      If finalizing a specific meal recommendation:
+      If finalizing a specific recommendation (ONLY when user agreed):
       {
         "type": "recommendation",
-        "message": "Here is the summary for your meal:",
+        "message": "Short summary:",
         "data": {
             "meal_name": "...",
-            "reasoning": "Hebrew explanation why this fits NOW.",
+            "reasoning": "Why this fits the remaining budget and time.",
             "preparation_time": "10 min",
-            "macros": { "calories": 300, "protein": 25, "carbs": 10, "fat": 15 },
-            "recipe_outline": "Brief instructions including EXACT weights for a single serving (e.g., 150g chicken)"
+            "macros": { "calories": 0, "protein": 0, "carbs": 0, "fat": 0 },
+            "recipe_outline": "Instructions with exact weights."
         }
       }
     `;
@@ -82,6 +112,7 @@ export async function POST(req: Request) {
     return await callGeminiWithFallback(apiKey, prompt, true, isCustomKey);
 
   } catch (error: any) {
+    console.error("Dietitian Chat API Error:", error);
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
 }
