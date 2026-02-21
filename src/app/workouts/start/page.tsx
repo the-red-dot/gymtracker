@@ -112,6 +112,72 @@ export default function StartWorkoutPage() {
   // Rest-day flag
   const [isRestToday, setIsRestToday] = useState<boolean>(false);
 
+  // Video Modal State
+  const [videoModalEquip, setVideoModalEquip] = useState<any>(null); // Will hold the equipment object
+  const [videoInput, setVideoInput] = useState('');
+  const [isEditingVideo, setIsEditingVideo] = useState(false);
+  const [savingVideo, setSavingVideo] = useState(false);
+
+  // Helper to convert media links (YouTube/Shorts, X/Twitter, TikTok) to Embed links with their Aspect Ratio
+  const getMediaEmbedInfo = (url: string) => {
+    if (!url) return null;
+    
+    // 1. YouTube Shorts (Vertical)
+    const ytShortsMatch = url.match(/youtube\.com\/shorts\/([\w-]{11})/i);
+    if (ytShortsMatch) {
+      return { type: 'youtube-shorts', url: `https://www.youtube.com/embed/${ytShortsMatch[1]}`, ratio: '9/16' };
+    }
+
+    // 2. YouTube Standard (Horizontal)
+    const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/i);
+    if (ytMatch) {
+      return { type: 'youtube', url: `https://www.youtube.com/embed/${ytMatch[1]}`, ratio: '16/9' };
+    }
+    
+    // 3. X / Twitter
+    const xMatch = url.match(/(?:x\.com|twitter\.com)\/(?:#!\/)?(?:\w+\/status(?:es)?|i\/status)\/(\d+)/i);
+    if (xMatch) {
+      return { type: 'twitter', url: `https://platform.twitter.com/embed/Tweet.html?id=${xMatch[1]}`, ratio: 'auto' };
+    }
+    
+    // 4. TikTok (Vertical - Standard format)
+    const tkMatch = url.match(/tiktok\.com\/(?:@[^\/]+\/video\/|v\/)(\d+)/i);
+    if (tkMatch) {
+      return { type: 'tiktok', url: `https://www.tiktok.com/embed/v2/${tkMatch[1]}`, ratio: '9/16' };
+    }
+
+    return null;
+  };
+
+  // Save Video URL to equipment table
+  const handleSaveVideo = async () => {
+    if (!videoModalEquip) return;
+    setSavingVideo(true);
+    const urlToSave = videoInput.trim() || null;
+    
+    const { error: err } = await supabase
+      .from('equipment')
+      .update({ video_url: urlToSave })
+      .eq('id', videoModalEquip.id);
+      
+    setSavingVideo(false);
+    if (err) {
+      alert('שגיאה בשמירת הסרטון: ' + err.message);
+      return;
+    }
+    
+    // Update local state to reflect changes instantly without reloading
+    setExercises(prev => prev.map(ex => {
+      if (ex.equipment_id === videoModalEquip.id) {
+        return { ...ex, equip: { ...ex.equip, video_url: urlToSave } };
+      }
+      return ex;
+    }));
+    
+    setVideoModalEquip({ ...videoModalEquip, video_url: urlToSave });
+    setIsEditingVideo(false);
+  };
+
   // Helper to register user activity (resets the inactivity timer)
   const registerActivity = () => {
     setLastActivity(Date.now());
@@ -247,7 +313,7 @@ export default function StartWorkoutPage() {
 
         const { data: wex, error: wexErr } = await supabase
           .from('workout_exercises')
-          .select('id, equipment_id, order_index, equipment:equipment_id ( id, name_en, name_he, image_url )')
+          .select('id, equipment_id, order_index, equipment:equipment_id ( id, name_en, name_he, image_url, video_url )')
           .eq('workout_id', active.id)
           .order('order_index', { ascending: true });
 
@@ -288,6 +354,7 @@ export default function StartWorkoutPage() {
               name_en: r.equipment?.name_en ?? null,
               name_he: r.equipment?.name_he ?? null,
               image_url: r.equipment?.image_url ?? null,
+              video_url: r.equipment?.video_url ?? null,
             },
             sets: setsByWe.get(r.id) ?? [],
           }))
@@ -315,7 +382,7 @@ export default function StartWorkoutPage() {
 
       const { data: rows, error } = await supabase
         .from('user_tab_equipment')
-        .select('equipment_id, selected_at, equipment:equipment_id ( id, name_en, name_he, image_url )')
+        .select('equipment_id, selected_at, equipment:equipment_id ( id, name_en, name_he, image_url, video_url )')
         .eq('user_id', userId)
         .eq('tab_id', chosenTabId)
         .order('selected_at', { ascending: true });
@@ -332,7 +399,8 @@ export default function StartWorkoutPage() {
             name_en: r.equipment?.name_en ?? null,
             name_he: r.equipment?.name_he ?? null,
             image_url: r.equipment?.image_url ?? null,
-          } as Equip,
+            video_url: r.equipment?.video_url ?? null,
+          } as any, // Cast to any to accept video_url without modifying Section 1 type
           sets: [],
         }))
         .filter((x: any) => !!x.equipment_id);
@@ -395,37 +463,43 @@ export default function StartWorkoutPage() {
     registerActivity(); // User interaction count as activity
 
     try {
-      // 1) Find last 7 workout_exercises for this equipment
-      const { data: wexRows, error: wexErr } = await supabase
-        .from('workout_exercises')
-        .select('id, workout_id, workouts!inner(started_at, user_id)')
-        .eq('equipment_id', equipmentId)
-        .eq('workouts.user_id', userId)
-        .order('started_at', { foreignTable: 'workouts', ascending: false })
+      // 1) Find last 7 workouts that included this equipment
+      const { data: wRows, error: wErr } = await supabase
+        .from('workouts')
+        .select('id, started_at, workout_exercises!inner(id, equipment_id)')
+        .eq('user_id', userId)
+        .eq('workout_exercises.equipment_id', equipmentId)
+        .order('started_at', { ascending: false })
         .limit(7);
 
-      if (wexErr) {
-        setError(wexErr.message);
+      if (wErr) {
+        setError(wErr.message);
         setHistoryBusy((m) => ({ ...m, [equipmentId]: false }));
         return;
       }
 
-      if (!wexRows || wexRows.length === 0) {
+      if (!wRows || wRows.length === 0) {
         setHistoryByEquip((m) => ({ ...m, [equipmentId]: [] }));
         setHistoryBusy((m) => ({ ...m, [equipmentId]: false }));
         return;
       }
 
-      const weIds = wexRows.map((r: any) => r.id);
-      
+      // Collect all workout_exercise IDs for these workouts and map them back to the workout
+      const weIds: number[] = [];
       const workoutMeta = new Map<number, string>();
-      wexRows.forEach((r: any) => {
-        if (r.workouts?.started_at) {
-          workoutMeta.set(r.workout_id, r.workouts.started_at);
+      const weToWorkout = new Map<number, number>();
+      
+      wRows.forEach((w: any) => {
+        workoutMeta.set(w.id, w.started_at);
+        if (Array.isArray(w.workout_exercises)) {
+          w.workout_exercises.forEach((we: any) => {
+            weIds.push(we.id);
+            weToWorkout.set(we.id, w.id);
+          });
         }
       });
 
-      // 2) all sets for those workout_exercises
+      // 2) Fetch all sets for those workout_exercises
       const { data: sets, error: sErr } = await supabase
         .from('exercise_sets')
         .select('id, workout_exercise_id, set_index, weight_kg, reps, distance_m')
@@ -439,9 +513,7 @@ export default function StartWorkoutPage() {
       }
 
       const rows: HistoryRow[] = (sets ?? []).map((s) => {
-        const parentWe = wexRows.find((r: any) => r.id === s.workout_exercise_id);
-        const wid = parentWe ? parentWe.workout_id : 0;
-        
+        const wid = weToWorkout.get(s.workout_exercise_id) || 0;
         return {
           id: s.id,
           set_index: s.set_index,
@@ -632,6 +704,13 @@ export default function StartWorkoutPage() {
   
   // Calculate specific equipment type for mobile modal layout adjustments
   const isCardio = activeMobileEx ? isCardioCheck(activeMobileEx.equip.name_en || activeMobileEx.equip.name_he || '') : false;
+
+  // Video embed info dynamically calculated
+  const embedInfo = videoModalEquip?.video_url ? getMediaEmbedInfo(videoModalEquip.video_url) : null;
+  // Calculate dynamic max-width logic to preserve aspect ratio without exceeding maxHeight (65vh)
+  let embedMaxWidth = '100%';
+  if (embedInfo?.ratio === '9/16') embedMaxWidth = 'calc(65vh * 9 / 16)';
+  else if (embedInfo?.ratio === '16/9') embedMaxWidth = 'calc(65vh * 16 / 9)';
 
   return (
     <div className="mx-auto max-w-6xl space-y-8" dir="rtl">
@@ -834,57 +913,66 @@ export default function StartWorkoutPage() {
                {/* Modal Body - Scrollable */}
                <div className="p-4 overflow-y-auto flex-1 space-y-6 bg-background">
                   
-                  {/* Image & History Toggle - CHANGED */}
-                  <div className="flex flex-col gap-4 items-center">
-                      {/* Image Container - CENTERED AND LARGER */}
-                      <div className="w-full h-48 sm:h-56 rounded-xl overflow-hidden border border-black/10 dark:border-white/10 bg-white shadow-sm relative group">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img 
-                            src={activeMobileEx.equip.image_url || PLACEHOLDER_IMG} 
-                            className="w-full h-full object-contain p-2" 
-                            alt="equipment" 
-                        />
-                      </div>
-
-                      {/* History Section - BUTTON WIDTH ADJUSTED */}
-                      <div className="w-full">
-                         <button
-                            onClick={async () => {
-                              registerActivity();
-                              const equipId = activeMobileEx.equipment_id;
-                              const open = !expanded[equipId];
-                              setExpanded((m) => ({ ...m, [equipId]: open }));
-                              if (open && historyByEquip[equipId] == null) {
-                                await loadHistory(equipId);
-                              }
-                            }}
-                            className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 text-sm font-bold transition-colors hover:bg-indigo-100 dark:hover:bg-indigo-900/30"
-                         >
-                            <span>{expanded[activeMobileEx.equipment_id] ? 'הסתר היסטוריה' : 'הצג היסטוריה אחרונה'}</span>
-                            <span>🕒</span>
-                         </button>
-
-                         {/* History container - REMOVED SCROLL, ADDED CONDITIONAL COLUMNS */}
-                         {expanded[activeMobileEx.equipment_id] && (
-                            <div className="mt-3 bg-white dark:bg-black/20 border border-black/5 dark:border-white/5 rounded-xl overflow-hidden shadow-sm animate-in fade-in slide-in-from-top-2 duration-200">
-                               <div className="p-0">
-                                   {historyBusy[activeMobileEx.equipment_id] ? (
-                                     <div className="p-4 text-center text-sm opacity-60">טוען נתונים...</div>
-                                   ) : (historyByEquip[activeMobileEx.equipment_id]?.length ?? 0) === 0 ? (
-                                     <div className="p-4 text-center text-sm opacity-60">אין היסטוריה לתרגיל זה</div>
-                                   ) : (
-                                     // Removed max-h and overflow-y to show full list
-                                     <AggregatedHistoryByWeight 
-                                         rows={historyByEquip[activeMobileEx.equipment_id]!} 
-                                         fmtDate={fmtDate}
-                                         isCardio={isCardio}
-                                     />
-                                   )}
-                               </div>
-                            </div>
-                         )}
-                      </div>
+                  {/* Image Container - CENTERED AND LARGER */}
+                  <div className="w-full h-48 sm:h-56 rounded-xl overflow-hidden border border-black/10 dark:border-white/10 bg-white shadow-sm relative group">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img 
+                        src={activeMobileEx.equip.image_url || PLACEHOLDER_IMG} 
+                        className="w-full h-full object-contain p-2" 
+                        alt="equipment" 
+                    />
                   </div>
+
+                  {/* Actions Row: History and Video */}
+                  <div className="w-full flex gap-2">
+                     <button
+                        onClick={() => {
+                          setVideoModalEquip((activeMobileEx.equip as any));
+                          setVideoInput((activeMobileEx.equip as any).video_url || '');
+                          setIsEditingVideo(!(activeMobileEx.equip as any).video_url);
+                        }}
+                        className="flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm font-bold transition-colors hover:bg-red-100 dark:hover:bg-red-900/30"
+                     >
+                        <span>{(activeMobileEx.equip as any).video_url ? 'הצג סרטון' : 'הוסף סרטון'}</span>
+                        <span className="text-lg leading-none">{(activeMobileEx.equip as any).video_url ? '🎥' : '🎬'}</span>
+                     </button>
+
+                     <button
+                        onClick={async () => {
+                          registerActivity();
+                          const equipId = activeMobileEx.equipment_id;
+                          const open = !expanded[equipId];
+                          setExpanded((m) => ({ ...m, [equipId]: open }));
+                          if (open && historyByEquip[equipId] == null) {
+                            await loadHistory(equipId);
+                          }
+                        }}
+                        className="flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 text-sm font-bold transition-colors hover:bg-indigo-100 dark:hover:bg-indigo-900/30"
+                     >
+                        <span>{expanded[activeMobileEx.equipment_id] ? 'הסתר היסטוריה' : 'היסטוריה אחרונה'}</span>
+                        <span>🕒</span>
+                     </button>
+                  </div>
+
+                  {/* History container - REMOVED SCROLL, ADDED CONDITIONAL COLUMNS */}
+                  {expanded[activeMobileEx.equipment_id] && (
+                     <div className="mt-1 bg-white dark:bg-black/20 border border-black/5 dark:border-white/5 rounded-xl overflow-hidden shadow-sm animate-in fade-in slide-in-from-top-2 duration-200">
+                        <div className="p-0">
+                            {historyBusy[activeMobileEx.equipment_id] ? (
+                              <div className="p-4 text-center text-sm opacity-60">טוען נתונים...</div>
+                            ) : (historyByEquip[activeMobileEx.equipment_id]?.length ?? 0) === 0 ? (
+                              <div className="p-4 text-center text-sm opacity-60">אין היסטוריה לתרגיל זה</div>
+                            ) : (
+                              // Removed max-h and overflow-y to show full list
+                              <AggregatedHistoryByWeight 
+                                  rows={historyByEquip[activeMobileEx.equipment_id]!} 
+                                  fmtDate={fmtDate}
+                                  isCardio={isCardio}
+                              />
+                            )}
+                        </div>
+                     </div>
+                  )}
 
                   {/* Input Form */}
                   <div className="bg-white dark:bg-neutral-800 p-5 rounded-xl border border-black/5 dark:border-white/5 shadow-sm ring-1 ring-black/5">
@@ -1078,8 +1166,20 @@ export default function StartWorkoutPage() {
                   />
                 </div>
 
-                {/* Toggle 7-day history */}
-                <div className="flex items-center justify-end">
+                {/* Actions: Toggle history and Video */}
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      setVideoModalEquip((ex.equip as any));
+                      setVideoInput((ex.equip as any).video_url || '');
+                      setIsEditingVideo(!(ex.equip as any).video_url);
+                    }}
+                    className="rounded-lg border border-red-200 dark:border-red-900/30 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors flex items-center gap-1"
+                  >
+                    <span className="text-lg leading-none">{(ex.equip as any).video_url ? '🎥' : '🎬'}</span>
+                    <span>{(ex.equip as any).video_url ? 'הצג סרטון' : 'הוסף סרטון'}</span>
+                  </button>
+
                   <button
                     onClick={async () => {
                       registerActivity();
@@ -1211,11 +1311,119 @@ export default function StartWorkoutPage() {
         })}
       </div>
 
+      {/* ===== VIDEO MODAL ===== */}
+      {videoModalEquip && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200" dir="rtl">
+          <div className="bg-white dark:bg-neutral-900 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
+            <div className="p-4 border-b border-black/10 dark:border-white/10 flex justify-between items-center bg-gray-50 dark:bg-white/5 shrink-0">
+              <h3 className="font-bold text-lg truncate px-2">
+                🎥 סרטון הדרכה: {videoModalEquip.name_he || videoModalEquip.name_en}
+              </h3>
+              <button 
+                 onClick={() => setVideoModalEquip(null)} 
+                 className="text-gray-500 hover:text-gray-800 dark:hover:text-white px-2 py-1"
+              >
+                 ✕
+              </button>
+            </div>
+            
+            <div className="p-5 flex flex-col gap-4 overflow-y-auto">
+              {!videoModalEquip.video_url || isEditingVideo ? (
+                <div className="space-y-3">
+                  <p className="text-sm opacity-80">
+                    הדבק כאן קישור ליוטיוב (רגיל או Shorts), סרטון מ-X (טוויטר) או טיקטוק, כדי לשמור סרטון הדרכה עבור התרגיל הזה. הסרטון יישמר לכל הפעמים הבאות שתבצע אותו.
+                  </p>
+                  <input
+                    type="url"
+                    placeholder="הדבק קישור כאן..."
+                    value={videoInput}
+                    onChange={e => setVideoInput(e.target.value)}
+                    className="w-full text-left ltr bg-gray-50 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-lg px-3 py-3 text-sm focus:ring-2 focus:ring-red-500 outline-none"
+                  />
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={handleSaveVideo}
+                      disabled={savingVideo || !videoInput.trim()}
+                      className="flex-1 bg-red-600 text-white font-bold py-2.5 rounded-lg hover:bg-red-700 disabled:opacity-50 transition"
+                    >
+                      {savingVideo ? 'שומר...' : 'שמור סרטון'}
+                    </button>
+                    {videoModalEquip.video_url && (
+                      <button 
+                        onClick={() => setIsEditingVideo(false)}
+                        className="px-4 bg-gray-200 dark:bg-white/10 rounded-lg text-sm font-medium transition"
+                      >
+                        ביטול
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4 flex flex-col items-center">
+                  <div 
+                     className="w-full flex justify-center items-center rounded-xl overflow-hidden bg-black ring-1 ring-black/10 dark:ring-white/10 relative" 
+                     style={{ maxHeight: '65vh', minHeight: '200px' }}
+                  >
+                    {embedInfo ? (
+                      <iframe 
+                        src={embedInfo.url} 
+                        className="w-full h-full"
+                        style={{ 
+                          aspectRatio: embedInfo.ratio !== 'auto' ? embedInfo.ratio : undefined,
+                          maxHeight: '65vh',
+                          maxWidth: embedMaxWidth,
+                          minHeight: embedInfo.ratio === 'auto' ? '60vh' : undefined
+                        }}
+                        allowFullScreen
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      ></iframe>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-48 w-full text-white/70 text-sm p-4 text-center">
+                        <span>לא ניתן להטמיע את הקישור במערכת.</span>
+                        <span>ודא שזהו קישור תקין ליוטיוב, X, או טיקטוק.</span>
+                        <a href={videoModalEquip.video_url} target="_blank" rel="noreferrer" className="text-blue-400 font-bold underline mt-3 block">פתח קישור בדפדפן</a>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="flex justify-between items-center w-full">
+                    <button 
+                      onClick={() => {
+                        if (!confirm('למחוק את הסרטון?')) return;
+                        setVideoInput('');
+                        // Hack to force save an empty string directly
+                        setIsEditingVideo(true);
+                      }}
+                      className="text-sm text-red-500 hover:text-red-700 flex items-center gap-1 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition"
+                    >
+                      <span>🗑️</span> מחק סרטון
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setVideoInput(videoModalEquip.video_url || '');
+                        setIsEditingVideo(true);
+                      }}
+                      className="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 flex items-center gap-1 px-2 py-1 rounded hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition"
+                    >
+                      <span>✏️</span> ערוך קישור
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {error && <p className="text-sm text-red-600">{error}</p>}
     </div>
   );
 }
 // ===== End Section 3 =====
+
+
+
+
 
 
 
