@@ -49,10 +49,10 @@ type Measurement = {
 // ===== SECTION 2 END =====
 
 // ===== SECTION 3 TITLE: Constants =====
-const KNOWN_GOALS: { key: string; label: string }[] = [
-  { key: 'bulking', label: 'BULKING – עלייה במסת שריר' },
-  { key: 'cutting', label: 'CUTTING – חיטוב / ירידה באחוזי שומן' },
-  { key: 'recomp',  label: 'RECOMP – ריקומפ (בניית שריר והורדת שומן במקביל)' },
+const KNOWN_GOALS: { key: string; label: string; icon: string }[] = [
+  { key: 'bulking', label: 'BULKING – עלייה במסת שריר', icon: '💪' },
+  { key: 'cutting', label: 'CUTTING – חיטוב וירידה בשומן', icon: '🔥' },
+  { key: 'recomp',  label: 'RECOMP – ריקומפ (בנייה והורדה במקביל)', icon: '⚖️' },
 ];
 
 const MEAS_HELP: Record<
@@ -106,7 +106,7 @@ const MEAS_HELP: Record<
   },
 };
 
-// תמונות למדידות — עודכן ללינקים מ־Imgur
+// תמונות למדידות
 const MEAS_IMG: Record<string, string> = {
   neck_cm:          'https://i.imgur.com/bKXG4Px.jpeg',
   shoulders_cm:     'https://i.imgur.com/mvWGAEC.jpeg',
@@ -159,7 +159,7 @@ export default function ProfilePage() {
     weight_kg: null,
     body_fat_percent: null,
     chest_cm: null,
-    waist_cm: null, // legacy (לא יוצג)
+    waist_cm: null, // legacy
     hips_cm: null,
     biceps_cm: null,
     thigh_cm: null,
@@ -172,18 +172,10 @@ export default function ProfilePage() {
   });
 
   const [recent, setRecent] = useState<Measurement[]>([]);
-  const [openMobileMeasId, setOpenMobileMeasId] = useState<number | null>(null);
-  const [deletingId, setDeletingId] = useState<number | null>(null); // <-- למחיקה פר-רשומה
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  // פורמט תאריך עברי
-  const fmt = useMemo(
-    () =>
-      new Intl.DateTimeFormat('he-IL', {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      }),
-    []
-  );
+  const fmtDate = useMemo(() => new Intl.DateTimeFormat('he-IL', { dateStyle: 'medium' }), []);
+  const fmtTime = useMemo(() => new Intl.DateTimeFormat('he-IL', { timeStyle: 'short' }), []);
 
   // ----- טעינת משתמש+נתונים -----
   useEffect(() => {
@@ -297,8 +289,6 @@ export default function ProfilePage() {
       return;
     }
     setRecent(data ?? []);
-    // מובייל: ברירת מחדל – רק האחרונה פתוחה
-    if (data && data.length > 0) setOpenMobileMeasId(data[0].id);
   };
 
   // ----- שמירת פרופיל -----
@@ -329,7 +319,7 @@ export default function ProfilePage() {
   // ----- פעילות -----
   const saveActivityLevel = async () => {
     if (!userId || !activityLevel) return;
-    setSavingActivityTrue();
+    setSavingActivity(true);
     setError(null);
 
     const { error } = await supabase.from('user_activity_levels').upsert(
@@ -340,7 +330,6 @@ export default function ProfilePage() {
     setSavingActivity(false);
     if (error) setError(error.message);
   };
-  function setSavingActivityTrue(){ setSavingActivity(true); }
 
   // ----- מטרות -----
   const isGoalChecked = (key: string) => goals.some((g) => g.goal_key === key);
@@ -390,12 +379,10 @@ export default function ProfilePage() {
       body_fat_percent: toNumOrNull(meas.body_fat_percent),
 
       chest_cm: toNumOrNull(meas.chest_cm),
-      // לא כותבים waist_cm (legacy). נשאר להצגה אחורית בלבד.
       hips_cm: toNumOrNull(meas.hips_cm),
       biceps_cm: toNumOrNull(meas.biceps_cm),
       thigh_cm: toNumOrNull(meas.thigh_cm),
       calf_cm: toNumOrNull(meas.calf_cm),
-
       neck_cm: toNumOrNull(meas.neck_cm),
       waist_navel_cm: toNumOrNull(meas.waist_navel_cm),
       waist_narrow_cm: toNumOrNull(meas.waist_narrow_cm),
@@ -413,19 +400,9 @@ export default function ProfilePage() {
     }
 
     setMeas({
-      weight_kg: null,
-      body_fat_percent: null,
-      chest_cm: null,
-      waist_cm: null,
-      hips_cm: null,
-      biceps_cm: null,
-      thigh_cm: null,
-      calf_cm: null,
-      neck_cm: null,
-      waist_navel_cm: null,
-      waist_narrow_cm: null,
-      shoulders_cm: null,
-      notes: null,
+      weight_kg: null, body_fat_percent: null, chest_cm: null, waist_cm: null, hips_cm: null,
+      biceps_cm: null, thigh_cm: null, calf_cm: null, neck_cm: null, waist_navel_cm: null,
+      waist_narrow_cm: null, shoulders_cm: null, notes: null,
     });
     if (userId) await fetchRecent(userId);
   };
@@ -433,16 +410,12 @@ export default function ProfilePage() {
   // ----- מחיקת מדידה בודדת -----
   const deleteMeasurement = async (id: number, whenISO: string) => {
     if (!userId) return;
-    const dateStr = fmt.format(new Date(whenISO));
+    const dateStr = fmtDate.format(new Date(whenISO));
     if (!confirm(`למחוק את המדידה מתאריך ${dateStr}? פעולה זו בלתי הפיכה.`)) return;
 
     setDeletingId(id);
     setError(null);
-    const { error } = await supabase
-      .from('body_measurements')
-      .delete()
-      .eq('user_id', userId)
-      .eq('id', id);
+    const { error } = await supabase.from('body_measurements').delete().eq('user_id', userId).eq('id', id);
 
     setDeletingId(null);
     if (error) {
@@ -453,570 +426,490 @@ export default function ProfilePage() {
   };
 
   if (loading) {
-    return <p className="opacity-70">טוען…</p>;
+    return <div className="p-8 text-center opacity-50">טוען פרופיל...</div>;
   }
 
-  // דגלים לפי מגדר – לשימוש בתגיות "מומלץ לנשים"
   const female = profile.gender === 'female';
 
   return (
-    <div className="mx-auto max-w-4xl space-y-8" dir="rtl">
-      <header className="space-y-1">
-        <h1 className="text-3xl font-bold tracking-tight">פרופיל מתאמן</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          עדכון פרטים בסיסיים, פעילות ומטרות, ומדידות מעקב.
-        </p>
-      </header>
+    <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300" dir="rtl">
+      
+      {/* Header Profile App Style */}
+      <div className="flex items-center gap-4 px-2">
+         <div className="w-16 h-16 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-2xl font-bold shadow-md">
+            {profile.full_name ? profile.full_name.charAt(0) : '👤'}
+         </div>
+         <div>
+            <h1 className="text-2xl font-bold tracking-tight">{profile.full_name || 'פרופיל אישי'}</h1>
+            <p className="text-sm opacity-70">
+              עדכון נתונים, מטרות ומדידות מעקב
+            </p>
+         </div>
+      </div>
 
-      {/* ==== Tabs header ==== */}
-      <nav
-        className="inline-flex rounded-lg ring-1 ring-black/10 dark:ring-white/10 overflow-hidden"
-        role="tablist"
-        aria-label="תצוגות פרופיל"
-      >
-        <button
-          role="tab"
-          aria-selected={activeTab === 'profile'}
-          className={`px-4 py-2 text-sm font-medium ${
-            activeTab === 'profile'
-              ? 'bg-foreground text-background'
-              : 'bg-background text-foreground/80 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
-          }`}
-          onClick={() => setActiveTab('profile')}
-        >
-          פרטים אישיים
-        </button>
-        <button
-          role="tab"
-          aria-selected={activeTab === 'activity'}
-          className={`px-4 py-2 text-sm font-medium ${
-            activeTab === 'activity'
-              ? 'bg-foreground text-background'
-              : 'bg-background text-foreground/80 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
-          }`}
-          onClick={() => setActiveTab('activity')}
-        >
-          פעילות ומטרות
-        </button>
-        <button
-          role="tab"
-          aria-selected={activeTab === 'measurements'}
-          className={`px-4 py-2 text-sm font-medium ${
-            activeTab === 'measurements'
-              ? 'bg-foreground text-background'
-              : 'bg-background text-foreground/80 hover:bg-black/[.04] dark:hover:bg-white/[.06]'
-          }`}
-          onClick={() => setActiveTab('measurements')}
-        >
-          עדכון מדידות
-        </button>
-      </nav>
+      {/* App-like Tab Navigation */}
+      <div className="bg-gray-100 dark:bg-white/5 p-1 rounded-2xl flex w-full overflow-hidden shadow-inner sticky top-16 z-20">
+        {[
+          { id: 'profile', label: 'פרופיל' },
+          { id: 'activity', label: 'מטרות' },
+          { id: 'measurements', label: 'מדידות' }
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as Tab)}
+            className={`flex-1 text-sm font-medium py-2.5 rounded-xl transition-all ${
+              activeTab === tab.id
+                ? 'bg-white dark:bg-neutral-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-      {/* ==== Tabs body ==== */}
-      <div className="relative">
+      {/* Tab Content Area */}
+      <div className="pt-2">
+        
+        {/* ===================== TAB: PROFILE ===================== */}
         {activeTab === 'profile' && (
-          <SectionCard title="פרטים אישיים">
-            <form onSubmit={saveProfile} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <TextField
-                label="שם מלא"
-                value={profile.full_name ?? ''}
-                onChange={(v) => setProfile((p) => ({ ...p, full_name: v }))}
-                className="md:col-span-2"
-                placeholder="לדוגמה: ישראל ישראלי"
-              />
-
-              <SelectField
-                label="מין"
-                value={profile.gender}
-                onChange={(v) => setProfile((p) => ({ ...p, gender: v as Gender }))}
-                options={[
-                  { value: 'unspecified', label: 'לא מצוין' },
-                  { value: 'male', label: 'זכר' },
-                  { value: 'female', label: 'נקבה' },
-                  { value: 'other', label: 'אחר' },
-                ]}
-              />
-              <TextField
-                label="תאריך לידה"
-                type="date"
-                value={profile.birth_date ?? ''}
-                onChange={(v) => setProfile((p) => ({ ...p, birth_date: v }))}
-              />
-
-              <NumberField
-                label="גובה (ס״מ)"
-                value={profile.height_cm}
-                onChange={(v) => setProfile((p) => ({ ...p, height_cm: v }))}
-                hint="משמש לנוסחאות הערכת אחוז שומן (US Navy) וליחס מותן/גובה."
-              />
-              <NumberField
-                label="משקל (ק״ג)"
-                value={profile.weight_kg}
-                onChange={(v) => setProfile((p) => ({ ...p, weight_kg: v }))}
-                hint="בבוקר, אחרי שירותים ולפני אוכל/קפה – למדידה עקבית."
-              />
-              <NumberField
-                label="אחוז שומן (%)"
-                value={profile.body_fat_percent}
-                onChange={(v) => setProfile((p) => ({ ...p, body_fat_percent: v }))}
-                hint="לא חובה. גם בלי זה נבין מגמות לפי היקפים."
-              />
-
-              <div className="md:col-span-2">
-                <button
-                  disabled={saving}
-                  className="inline-flex items-center justify-center rounded-lg px-4 py-2 h-11 bg-foreground text-background hover:opacity-90 disabled:opacity-50 w-full md:w-auto"
-                >
-                  {saving ? 'שומר…' : 'שמור פרטים'}
-                </button>
-              </div>
-            </form>
-          </SectionCard>
-        )}
-
-        {activeTab === 'activity' && (
-          <SectionCard title="פעילות ומטרות">
-            <div className="grid gap-8">
-              {/* פעילות */}
-              <div className="grid gap-3">
-                <h3 className="font-semibold">רמת פעילות</h3>
-                <p className="text-sm opacity-80">בחר/י את עוצמת האימונים השבועית שלך.</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <RadioTile
-                    name="activity"
-                    checked={activityLevel === 'sedentary'}
-                    onChange={() => setActivityLevel('sedentary')}
-                    title="מעט או בכלל לא"
-                    subtitle="מעט תנועה ביום, ללא אימונים קבועים"
+          <div className="space-y-6">
+            <div className="bg-white dark:bg-neutral-800 rounded-3xl p-5 md:p-6 shadow-sm border border-black/5 dark:border-white/5">
+              <form onSubmit={saveProfile} className="space-y-5">
+                
+                <div className="space-y-1">
+                   <h3 className="font-bold">פרטים בסיסיים</h3>
+                   <p className="text-xs opacity-60">הפרטים הכלליים שלך לחישובים ותצוגה.</p>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <TextField
+                    label="שם מלא"
+                    value={profile.full_name ?? ''}
+                    onChange={(v) => setProfile((p) => ({ ...p, full_name: v }))}
+                    placeholder="ישראל ישראלי"
                   />
-                  <RadioTile
-                    name="activity"
-                    checked={activityLevel === 'light'}
-                    onChange={() => setActivityLevel('light')}
-                    title="קל (1–3 בשבוע)"
-                    subtitle="הליכות/אימונים קלים 1–3 פעמים בשבוע"
+                  <SelectField
+                    label="מין (רלוונטי לחישובי TDEE/Navy)"
+                    value={profile.gender}
+                    onChange={(v) => setProfile((p) => ({ ...p, gender: v as Gender }))}
+                    options={[
+                      { value: 'unspecified', label: 'לא מצוין' },
+                      { value: 'male', label: 'זכר' },
+                      { value: 'female', label: 'נקבה' },
+                      { value: 'other', label: 'אחר' },
+                    ]}
                   />
-                  <RadioTile
-                    name="activity"
-                    checked={activityLevel === 'moderate'}
-                    onChange={() => setActivityLevel('moderate')}
-                    title="בינוני (3–5 בשבוע)"
-                    subtitle="אימונים עצימים בינונית 3–5 פעמים בשבוע"
-                  />
-                  <RadioTile
-                    name="activity"
-                    checked={activityLevel === 'very_active'}
-                    onChange={() => setActivityLevel('very_active')}
-                    title="גבוה (6–7 בשבוע)"
-                    subtitle="אימונים תכופים/עבודה פיזית"
+                  <TextField
+                    label="תאריך לידה"
+                    type="date"
+                    value={profile.birth_date ?? ''}
+                    onChange={(v) => setProfile((p) => ({ ...p, birth_date: v }))}
                   />
                 </div>
-                <div>
+
+                <div className="space-y-1 pt-4 border-t border-black/5 dark:border-white/5">
+                   <h3 className="font-bold">נתוני גוף התחלתיים</h3>
+                   <p className="text-xs opacity-60">הבסיס לחישוב BMR ו-TDEE. מומלץ בהמשך לעדכן דרך טאב המדידות.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <NumberField
+                    label="גובה (ס״מ)"
+                    value={profile.height_cm}
+                    onChange={(v) => setProfile((p) => ({ ...p, height_cm: v }))}
+                  />
+                  <NumberField
+                    label="משקל נוכחי (ק״ג)"
+                    value={profile.weight_kg}
+                    onChange={(v) => setProfile((p) => ({ ...p, weight_kg: v }))}
+                  />
+                  <NumberField
+                    label="אחוז שומן (%)"
+                    value={profile.body_fat_percent}
+                    onChange={(v) => setProfile((p) => ({ ...p, body_fat_percent: v }))}
+                    placeholder="לא חובה"
+                  />
+                </div>
+
+                <div className="pt-4 flex justify-end">
                   <button
-                    onClick={saveActivityLevel}
-                    disabled={!activityLevel || savingActivity}
-                    className="rounded-lg px-4 py-2 h-11 bg-foreground text-background hover:opacity-90 disabled:opacity-50"
+                    disabled={saving}
+                    className="w-full md:w-auto px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-md hover:bg-indigo-700 transition disabled:opacity-50"
                   >
-                    {savingActivity ? 'שומר…' : 'שמור רמת פעילות'}
-                  </button>
-                </div>
-              </div>
-
-              {/* מטרות */}
-              <div className="grid gap-3">
-                <h3 className="font-semibold">מטרות</h3>
-                <p className="text-sm opacity-80">בחר/י מטרה אחת או יותר מתוך האפשרויות הבאות.</p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {KNOWN_GOALS.map((g) => (
-                    <label
-                      key={g.key}
-                      className="flex items-center gap-2 rounded-lg border border-black/10 dark:border-white/20 px-3 py-2"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isGoalChecked(g.key)}
-                        onChange={() => toggleKnownGoal(g.key, g.label)}
-                        disabled={goalsBusy}
-                      />
-                      <span>{g.label}</span>
-                    </label>
-                  ))}
-                </div>
-
-                {goals.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {goals.map((g) => (
-                      <span
-                        key={g.id}
-                        className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm border border-black/10 dark:border-white/20"
-                      >
-                        {g.label}
-                        <button
-                          onClick={() => removeGoal(g.id)}
-                          className="opacity-70 hover:opacity-100"
-                          aria-label={`הסר ${g.label}`}
-                        >
-                          ✕
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </SectionCard>
-        )}
-
-        {activeTab === 'measurements' && (
-          <>
-            <SectionCard
-              title="עדכון מדידות"
-              subtitle="למדידה עקבית: בבוקר, אחרי שירותים, לפני אוכל/קפה. אותו סרט, אותה נקודה, אותו לחץ."
-            >
-              <form
-                onSubmit={addMeasurement}
-                // יותר גדולות במסכים רחבים, 2 בעמודה במובייל
-                className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6 gap-4"
-              >
-                {/* --- סדר לפי הגוף מלמעלה למטה --- */}
-                <MeasurementField
-                  label="צוואר (ס״מ)"
-                  value={meas.neck_cm ?? null}
-                  onChange={(v) => setMeas((m) => ({ ...m, neck_cm: v }))}
-                  helpTitle={MEAS_HELP.neck_cm.title}
-                  helpText={MEAS_HELP.neck_cm.text}
-                  imageSrc={MEAS_IMG.neck_cm}
-                />
-                <MeasurementField
-                  label="כתפיים (ס״מ)"
-                  value={meas.shoulders_cm ?? null}
-                  onChange={(v) => setMeas((m) => ({ ...m, shoulders_cm: v }))}
-                  helpTitle={MEAS_HELP.shoulders_cm.title}
-                  helpText={MEAS_HELP.shoulders_cm.text}
-                  imageSrc={MEAS_IMG.shoulders_cm}
-                />
-                <MeasurementField
-                  label="חזה (ס״מ)"
-                  value={meas.chest_cm}
-                  onChange={(v) => setMeas((m) => ({ ...m, chest_cm: v }))}
-                  helpTitle={MEAS_HELP.chest_cm.title}
-                  helpText={MEAS_HELP.chest_cm.text}
-                  imageSrc={MEAS_IMG.chest_cm}
-                />
-                <MeasurementField
-                  label="יד קדמית (ס״מ)"
-                  value={meas.biceps_cm}
-                  onChange={(v) => setMeas((m) => ({ ...m, biceps_cm: v }))}
-                  helpTitle={MEAS_HELP.biceps_cm.title}
-                  helpText={MEAS_HELP.biceps_cm.text}
-                  imageSrc={MEAS_IMG.biceps_cm}
-                />
-                <MeasurementField
-                  label="מותן – נקודה צרה (ס״מ)"
-                  value={meas.waist_narrow_cm ?? (meas.waist_cm ?? null)}
-                  onChange={(v) => setMeas((m) => ({ ...m, waist_narrow_cm: v }))}
-                  helpTitle={MEAS_HELP.waist_narrow_cm.title}
-                  helpText={MEAS_HELP.waist_narrow_cm.text}
-                  imageSrc={MEAS_IMG.waist_narrow_cm}
-                />
-                <MeasurementField
-                  label="מותן – טבור (ס״מ)"
-                  value={meas.waist_navel_cm ?? null}
-                  onChange={(v) => setMeas((m) => ({ ...m, waist_navel_cm: v }))}
-                  helpTitle={MEAS_HELP.waist_navel_cm.title}
-                  helpText={MEAS_HELP.waist_navel_cm.text}
-                  imageSrc={MEAS_IMG.waist_navel_cm}
-                />
-                <MeasurementField
-                  label="ירכיים (ס״מ)"
-                  value={meas.hips_cm}
-                  onChange={(v) => setMeas((m) => ({ ...m, hips_cm: v }))}
-                  helpTitle={MEAS_HELP.hips_cm.title}
-                  helpText={MEAS_HELP.hips_cm.text}
-                  recommended={female}
-                  imageSrc={MEAS_IMG.hips_cm}
-                />
-                <MeasurementField
-                  label="ירך (ס״מ)"
-                  value={meas.thigh_cm}
-                  onChange={(v) => setMeas((m) => ({ ...m, thigh_cm: v }))}
-                  helpTitle={MEAS_HELP.thigh_cm.title}
-                  helpText={MEAS_HELP.thigh_cm.text}
-                  imageSrc={MEAS_IMG.thigh_cm}
-                />
-                <MeasurementField
-                  label="שוק (ס״מ)"
-                  value={meas.calf_cm}
-                  onChange={(v) => setMeas((m) => ({ ...m, calf_cm: v }))}
-                  helpTitle={MEAS_HELP.calf_cm.title}
-                  helpText={MEAS_HELP.calf_cm.text}
-                  imageSrc={MEAS_IMG.calf_cm}
-                />
-
-                {/* בסוף: משקל ואחוז שומן */}
-                <MeasurementField
-                  label="משקל (ק״ג)"
-                  value={meas.weight_kg}
-                  onChange={(v) => setMeas((m) => ({ ...m, weight_kg: v }))}
-                  helpTitle={MEAS_HELP.weight_kg.title}
-                  helpText={MEAS_HELP.weight_kg.text}
-                  imageSrc={MEAS_IMG.weight_kg}
-                />
-                <MeasurementField
-                  label="אחוז שומן (%)"
-                  value={meas.body_fat_percent}
-                  onChange={(v) => setMeas((m) => ({ ...m, body_fat_percent: v }))}
-                  helpTitle={MEAS_HELP.body_fat_percent.title}
-                  helpText={MEAS_HELP.body_fat_percent.text}
-                  imageSrc={MEAS_IMG.body_fat_percent}
-                />
-
-                {/* הערות הוסתרו לפי בקשה */}
-
-                <div className="col-span-2 md:col-span-3 lg:col-span-4 2xl:col-span-6">
-                  <button
-                    disabled={addingMeas}
-                    className="inline-flex items-center justify-center rounded-lg px-4 py-2 h-11 bg-foreground text-background hover:opacity-90 disabled:opacity-50 w-full md:w-auto"
-                  >
-                    {addingMeas ? 'מוסיף…' : 'הוסף מדידה'}
+                    {saving ? 'שומר שינויים...' : 'שמור פרופיל'}
                   </button>
                 </div>
               </form>
-            </SectionCard>
-
-            {/* רשימת מדידות אחרונות */}
-            <SectionCard title="מדידות אחרונות">
-              {recent.length === 0 ? (
-                <p className="opacity-70">עוד אין מדידות.</p>
-              ) : (
-                <>
-                  {/* מובייל: כרטיסים מתקפלים */}
-                  <div className="grid gap-3 md:hidden">
-                    {recent.map((r) => {
-                      const open = openMobileMeasId === r.id;
-                      return (
-                        <div
-                          key={r.id}
-                          className="rounded-lg ring-1 ring-black/10 dark:ring-white/10 overflow-hidden"
-                        >
-                          <button
-                            className="w-full flex items-center justify-between px-3 py-3 text-right"
-                            onClick={() =>
-                              setOpenMobileMeasId((prev) => (prev === r.id ? null : r.id))
-                            }
-                            aria-expanded={open}
-                            aria-controls={`meas-${r.id}`}
-                          >
-                            <div className="text-sm font-medium">
-                              {fmt.format(new Date(r.measured_at))}
-                            </div>
-                            <div className={`transform transition ${open ? 'rotate-180' : ''}`}>
-                              ▾
-                            </div>
-                          </button>
-
-                          {open && (
-                            <div id={`meas-${r.id}`} className="px-3 pb-3">
-                              <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                                <KV k="משקל" v={num(r.weight_kg)} />
-                                <KV k="% שומן" v={num(r.body_fat_percent)} />
-                                <KV k="מותן–טבור" v={num(r.waist_navel_cm ?? null)} />
-                                <KV k="מותן–צרה" v={num(r.waist_narrow_cm ?? r.waist_cm ?? null)} />
-                                <KV k="ירכיים" v={num(r.hips_cm)} />
-                                <KV k="חזה" v={num(r.chest_cm)} />
-                                <KV k="כתפיים" v={num(r.shoulders_cm ?? null)} />
-                                <KV k="יד קדמית" v={num(r.biceps_cm)} />
-                                <KV k="ירך" v={num(r.thigh_cm)} />
-                                <KV k="שוק" v={num(r.calf_cm)} />
-                                <KV k="צוואר" v={num(r.neck_cm ?? null)} />
-                              </div>
-
-                              {/* כפתור מחיקה במובייל */}
-                              <div className="mt-3">
-                                <button
-                                  onClick={() => deleteMeasurement(r.id, r.measured_at)}
-                                  disabled={deletingId === r.id}
-                                  className="rounded-lg px-3 py-2 bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
-                                >
-                                  {deletingId === r.id ? 'מוחק…' : 'מחק מדידה זו'}
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* דסקטופ: טבלה + כפתור מחיקה לכל שורה */}
-                  <div className="hidden md:block overflow-x-auto rounded-lg ring-1 ring-black/10 dark:ring-white/10">
-                    <table className="min-w-full text-sm">
-                      <thead className="bg-black/5 dark:bg-white/10">
-                        <tr className="text-right">
-                          <Th>תאריך</Th>
-                          <Th>משקל</Th>
-                          <Th>% שומן</Th>
-                          <Th>מותן–טבור</Th>
-                          <Th>מותן–צרה</Th>
-                          <Th>ירכיים</Th>
-                          <Th>חזה</Th>
-                          <Th>כתפיים</Th>
-                          <Th>יד קדמית</Th>
-                          <Th>ירך</Th>
-                          <Th>שוק</Th>
-                          <Th>צוואר</Th>
-                          <Th>פעולות</Th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-black/10 dark:divide-white/10">
-                        {recent.map((r) => (
-                          <tr key={r.id}>
-                            <Td>{fmt.format(new Date(r.measured_at))}</Td>
-                            <Td>{num(r.weight_kg)}</Td>
-                            <Td>{num(r.body_fat_percent)}</Td>
-                            <Td>{num(r.waist_navel_cm ?? null)}</Td>
-                            <Td>{num(r.waist_narrow_cm ?? r.waist_cm ?? null)}</Td>
-                            <Td>{num(r.hips_cm)}</Td>
-                            <Td>{num(r.chest_cm)}</Td>
-                            <Td>{num(r.shoulders_cm ?? null)}</Td>
-                            <Td>{num(r.biceps_cm)}</Td>
-                            <Td>{num(r.thigh_cm)}</Td>
-                            <Td>{num(r.calf_cm)}</Td>
-                            <Td>{num(r.neck_cm ?? null)}</Td>
-                            <Td>
-                              <button
-                                onClick={() => deleteMeasurement(r.id, r.measured_at)}
-                                disabled={deletingId === r.id}
-                                className="rounded-md px-2 py-1 bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
-                              >
-                                {deletingId === r.id ? 'מוחק…' : 'מחק'}
-                              </button>
-                            </Td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
-            </SectionCard>
-          </>
+            </div>
+          </div>
         )}
-      </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+        {/* ===================== TAB: ACTIVITY & GOALS ===================== */}
+        {activeTab === 'activity' && (
+          <div className="space-y-4">
+            {/* Activity Card */}
+            <div className="bg-white dark:bg-neutral-800 rounded-3xl p-5 md:p-6 shadow-sm border border-black/5 dark:border-white/5">
+              <div className="space-y-1 mb-4">
+                 <h3 className="font-bold text-lg">רמת פעילות שבועית</h3>
+                 <p className="text-xs opacity-60">משפיע ישירות על כמות הקלוריות היומית המומלצת (TDEE).</p>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                <RadioTile
+                  name="activity"
+                  checked={activityLevel === 'sedentary'}
+                  onChange={() => setActivityLevel('sedentary')}
+                  title="מעט או בכלל לא"
+                  subtitle="יושבני, ללא אימונים קבועים"
+                  icon="🛋️"
+                />
+                <RadioTile
+                  name="activity"
+                  checked={activityLevel === 'light'}
+                  onChange={() => setActivityLevel('light')}
+                  title="קל (1–3 בשבוע)"
+                  subtitle="הליכות / אימונים קלים"
+                  icon="🚶"
+                />
+                <RadioTile
+                  name="activity"
+                  checked={activityLevel === 'moderate'}
+                  onChange={() => setActivityLevel('moderate')}
+                  title="בינוני (3–5 בשבוע)"
+                  subtitle="אימונים עצימים בינונית"
+                  icon="🏃"
+                />
+                <RadioTile
+                  name="activity"
+                  checked={activityLevel === 'very_active'}
+                  onChange={() => setActivityLevel('very_active')}
+                  title="גבוה (6–7 בשבוע)"
+                  subtitle="אימונים תכופים / עבודה פיזית"
+                  icon="🔥"
+                />
+              </div>
+              
+              <div className="flex justify-end">
+                <button
+                  onClick={saveActivityLevel}
+                  disabled={!activityLevel || savingActivity}
+                  className="w-full md:w-auto px-6 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition disabled:opacity-50"
+                >
+                  {savingActivity ? 'שומר...' : 'שמור רמת פעילות'}
+                </button>
+              </div>
+            </div>
+
+            {/* Goals Card */}
+            <div className="bg-white dark:bg-neutral-800 rounded-3xl p-5 md:p-6 shadow-sm border border-black/5 dark:border-white/5">
+              <div className="space-y-1 mb-4">
+                 <h3 className="font-bold text-lg">המטרות שלך</h3>
+                 <p className="text-xs opacity-60">בחר את המטרה המרכזית שלך (אפשר לבחור כמה, הדיאטנית תתחשב בזה).</p>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {KNOWN_GOALS.map((g) => {
+                  const checked = isGoalChecked(g.key);
+                  return (
+                    <label
+                      key={g.key}
+                      className={`relative flex items-center gap-3 p-4 rounded-2xl border cursor-pointer transition-all ${
+                        checked 
+                          ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 ring-1 ring-indigo-500/20' 
+                          : 'border-black/5 dark:border-white/5 hover:border-black/20 hover:bg-black/5 dark:hover:bg-white/5'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={checked}
+                        onChange={() => toggleKnownGoal(g.key, g.label)}
+                        disabled={goalsBusy}
+                      />
+                      <span className="text-2xl">{g.icon}</span>
+                      <span className={`font-semibold text-sm leading-tight ${checked ? 'text-indigo-900 dark:text-indigo-100' : ''}`}>
+                        {g.label.split('–')[0].trim()}<br/>
+                        <span className="text-xs opacity-70 font-normal">{g.label.split('–')[1]?.trim()}</span>
+                      </span>
+                      {checked && (
+                        <div className="absolute top-2 left-2 text-indigo-500">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+                        </div>
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===================== TAB: MEASUREMENTS ===================== */}
+        {activeTab === 'measurements' && (
+          <div className="space-y-6">
+            
+            {/* Add New Measurement Card */}
+            <div className="bg-white dark:bg-neutral-800 rounded-3xl p-5 shadow-sm border border-black/5 dark:border-white/5">
+              <div className="mb-4">
+                 <h3 className="font-bold text-lg">תיעוד מדידה חדשה</h3>
+                 <p className="text-xs opacity-60">הזן נתונים בבוקר, אחרי שירותים ולפני אוכל. אין צורך למלא הכל בכל פעם.</p>
+              </div>
+
+              <form onSubmit={addMeasurement} className="space-y-5">
+                
+                {/* Core Stats First */}
+                <div className="grid grid-cols-2 gap-3 pb-4 border-b border-black/5 dark:border-white/5">
+                   <MeasurementField
+                      label="משקל"
+                      value={meas.weight_kg}
+                      onChange={(v: number | null) => setMeas((m) => ({ ...m, weight_kg: v }))}
+                      helpTitle={MEAS_HELP.weight_kg.title}
+                      helpText={MEAS_HELP.weight_kg.text}
+                      imageSrc={MEAS_IMG.weight_kg}
+                      unit="ק״ג"
+                    />
+                    <MeasurementField
+                      label="אחוז שומן"
+                      value={meas.body_fat_percent}
+                      onChange={(v: number | null) => setMeas((m) => ({ ...m, body_fat_percent: v }))}
+                      helpTitle={MEAS_HELP.body_fat_percent.title}
+                      helpText={MEAS_HELP.body_fat_percent.text}
+                      imageSrc={MEAS_IMG.body_fat_percent}
+                      unit="%"
+                    />
+                </div>
+
+                {/* Optional Tapes Grid - Dense Mobile Layout */}
+                <div className="pt-2">
+                  <p className="text-xs font-bold opacity-50 mb-3 uppercase tracking-wider">היקפים אופציונליים (ס"מ)</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                    <MeasurementField label="צוואר" value={meas.neck_cm ?? null} onChange={(v: number | null) => setMeas((m) => ({ ...m, neck_cm: v }))} helpTitle={MEAS_HELP.neck_cm.title} helpText={MEAS_HELP.neck_cm.text} imageSrc={MEAS_IMG.neck_cm} />
+                    <MeasurementField label="כתפיים" value={meas.shoulders_cm ?? null} onChange={(v: number | null) => setMeas((m) => ({ ...m, shoulders_cm: v }))} helpTitle={MEAS_HELP.shoulders_cm.title} helpText={MEAS_HELP.shoulders_cm.text} imageSrc={MEAS_IMG.shoulders_cm} />
+                    <MeasurementField label="חזה" value={meas.chest_cm} onChange={(v: number | null) => setMeas((m) => ({ ...m, chest_cm: v }))} helpTitle={MEAS_HELP.chest_cm.title} helpText={MEAS_HELP.chest_cm.text} imageSrc={MEAS_IMG.chest_cm} />
+                    <MeasurementField label="יד קדמית" value={meas.biceps_cm} onChange={(v: number | null) => setMeas((m) => ({ ...m, biceps_cm: v }))} helpTitle={MEAS_HELP.biceps_cm.title} helpText={MEAS_HELP.biceps_cm.text} imageSrc={MEAS_IMG.biceps_cm} />
+                    <MeasurementField label="מותן (צרה)" value={meas.waist_narrow_cm ?? null} onChange={(v: number | null) => setMeas((m) => ({ ...m, waist_narrow_cm: v }))} helpTitle={MEAS_HELP.waist_narrow_cm.title} helpText={MEAS_HELP.waist_narrow_cm.text} imageSrc={MEAS_IMG.waist_narrow_cm} />
+                    <MeasurementField label="מותן (טבור)" value={meas.waist_navel_cm ?? null} onChange={(v: number | null) => setMeas((m) => ({ ...m, waist_navel_cm: v }))} helpTitle={MEAS_HELP.waist_navel_cm.title} helpText={MEAS_HELP.waist_navel_cm.text} imageSrc={MEAS_IMG.waist_navel_cm} />
+                    <MeasurementField label="ירכיים/אגן" value={meas.hips_cm} onChange={(v: number | null) => setMeas((m) => ({ ...m, hips_cm: v }))} helpTitle={MEAS_HELP.hips_cm.title} helpText={MEAS_HELP.hips_cm.text} recommended={female} imageSrc={MEAS_IMG.hips_cm} />
+                    <MeasurementField label="ירך" value={meas.thigh_cm} onChange={(v: number | null) => setMeas((m) => ({ ...m, thigh_cm: v }))} helpTitle={MEAS_HELP.thigh_cm.title} helpText={MEAS_HELP.thigh_cm.text} imageSrc={MEAS_IMG.thigh_cm} />
+                    <MeasurementField label="שוק" value={meas.calf_cm} onChange={(v: number | null) => setMeas((m) => ({ ...m, calf_cm: v }))} helpTitle={MEAS_HELP.calf_cm.title} helpText={MEAS_HELP.calf_cm.text} imageSrc={MEAS_IMG.calf_cm} />
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    disabled={addingMeas}
+                    className="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-xl font-bold shadow-md hover:opacity-90 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <span>{addingMeas ? 'שומר...' : '➕ הוסף מדידה ליומן'}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* History List (App Style Cards) */}
+            <div className="bg-white dark:bg-neutral-800 rounded-3xl p-5 shadow-sm border border-black/5 dark:border-white/5">
+              <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+                <span>📅</span> היסטוריית מדידות
+              </h3>
+              
+              {recent.length === 0 ? (
+                <div className="text-center py-8 opacity-50 text-sm bg-black/5 dark:bg-white/5 rounded-2xl">
+                  עוד אין מדידות מוקלטות.
+                </div>
+              ) : (
+                <div className="grid gap-3">
+                  {recent.map((r) => (
+                    <div key={r.id} className="relative bg-gray-50 dark:bg-black/20 border border-black/5 dark:border-white/5 rounded-2xl p-4 flex flex-col gap-3 group">
+                      
+                      {/* Header Date & Delete */}
+                      <div className="flex justify-between items-center pb-2 border-b border-black/5 dark:border-white/5">
+                         <div className="font-bold text-sm text-indigo-900 dark:text-indigo-200">
+                           {fmtDate.format(new Date(r.measured_at))}
+                           <span className="text-xs opacity-50 font-normal mr-2">
+                             {fmtTime.format(new Date(r.measured_at))}
+                           </span>
+                         </div>
+                         <button
+                            onClick={() => deleteMeasurement(r.id, r.measured_at)}
+                            disabled={deletingId === r.id}
+                            className="text-gray-400 hover:text-red-500 p-1 transition-colors"
+                            aria-label="מחק"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                          </button>
+                      </div>
+
+                      {/* Main Stats */}
+                      <div className="flex gap-4 items-center">
+                         {r.weight_kg != null && (
+                           <div className="flex flex-col">
+                             <span className="text-[10px] opacity-60 font-bold uppercase">משקל</span>
+                             <span className="font-black text-xl tabular-nums">{r.weight_kg}<span className="text-xs font-medium opacity-50">kg</span></span>
+                           </div>
+                         )}
+                         {r.body_fat_percent != null && (
+                           <>
+                             <div className="w-px h-8 bg-black/10 dark:bg-white/10"></div>
+                             <div className="flex flex-col">
+                               <span className="text-[10px] opacity-60 font-bold uppercase">שומן</span>
+                               <span className="font-black text-xl tabular-nums">{r.body_fat_percent}<span className="text-xs font-medium opacity-50">%</span></span>
+                             </div>
+                           </>
+                         )}
+                      </div>
+
+                      {/* Optional Tapes (Collapsible visually for cleanliness) */}
+                      {Object.keys(r).some(k => k.includes('_cm') && (r as any)[k] != null) && (
+                        <div className="pt-2 mt-1">
+                           <div className="flex flex-wrap gap-1.5">
+                              {['waist_navel_cm', 'waist_narrow_cm', 'chest_cm', 'hips_cm', 'biceps_cm', 'thigh_cm', 'calf_cm', 'neck_cm', 'shoulders_cm'].map(k => {
+                                 const val = (r as any)[k];
+                                 if (val == null) return null;
+                                 const name = MEAS_HELP[k]?.title?.replace(' (ס״מ)', '') || k;
+                                 return (
+                                   <div key={k} className="bg-white dark:bg-neutral-800 border border-black/5 dark:border-white/5 rounded-md px-2 py-1 flex items-center gap-1.5 text-[11px]">
+                                      <span className="opacity-60">{name}</span>
+                                      <span className="font-bold tabular-nums">{val}</span>
+                                   </div>
+                                 );
+                              })}
+                           </div>
+                        </div>
+                      )}
+
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+      </div>
+      {error && <div className="fixed bottom-4 left-4 right-4 bg-red-600 text-white p-3 rounded-xl text-sm text-center shadow-lg z-50 animate-in slide-in-from-bottom-5">{error}</div>}
     </div>
   );
 }
 // ===== SECTION 4 END =====
 
-// ===== SECTION 5 TITLE: Layout Helpers (SectionCard) =====
-function SectionCard({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 bg-background">
-      <div className="p-4 md:p-6 border-b border-black/10 dark:border-white/10">
-        <h2 className="text-xl font-semibold">{title}</h2>
-        {subtitle && (
-          <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">{subtitle}</p>
-        )}
-      </div>
-      <div className="p-4 md:p-6">{children}</div>
-    </section>
-  );
-}
-// ===== SECTION 5 END =====
+// ===== SECTION 5 TITLE: Shared Components =====
 
-// ===== SECTION 6 TITLE: Small Key-Value for Mobile Cards =====
-function KV({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <span className="opacity-70">{k}</span>
-      <span className="font-medium">{v || '-'}</span>
-    </div>
-  );
-}
-// ===== SECTION 6 END =====
-
-// ===== SECTION 7 TITLE: Form Inputs & MeasurementField =====
-function TextField({
-  label,
-  value,
-  onChange,
-  type = 'text',
-  placeholder,
-  className = '',
-}: {
+interface TextFieldProps {
   label: string;
   value: string;
   onChange: (v: string) => void;
   type?: string;
   placeholder?: string;
   className?: string;
-}) {
+}
+
+function TextField({ label, value, onChange, type = 'text', placeholder, className = '' }: TextFieldProps) {
   return (
-    <label className={`grid gap-1 ${className}`}>
-      <span className="text-sm">{label}</span>
+    <label className={`flex flex-col gap-1.5 ${className}`}>
+      <span className="text-xs font-bold opacity-70 ml-1">{label}</span>
       <input
         type={type}
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full min-w-0 rounded-lg border border-black/10 dark:border-white/20 bg-transparent px-3 py-2 text-right
-                   focus-visible:outline-none focus:ring-2 focus:ring-foreground/40"
+        className="w-full bg-gray-50 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-shadow"
       />
     </label>
   );
 }
 
-function NumberField({
-  label,
-  value,
-  onChange,
-  className = '',
-  hint,
-}: {
+interface SelectFieldProps {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  className?: string;
+}
+
+function SelectField({ label, value, onChange, options, className = '' }: SelectFieldProps) {
+  return (
+    <label className={`flex flex-col gap-1.5 ${className}`}>
+      <span className="text-xs font-bold opacity-70 ml-1">{label}</span>
+      <div className="relative">
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full appearance-none bg-gray-50 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-shadow"
+        >
+          {options.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center px-4 text-gray-500 opacity-50">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+        </div>
+      </div>
+    </label>
+  );
+}
+
+interface NumberFieldProps {
   label: string;
   value: number | null;
   onChange: (v: number | null) => void;
-  className?: string;
   hint?: string;
-}) {
+  className?: string;
+  placeholder?: string;
+}
+
+function NumberField({ label, value, onChange, hint, className = '', placeholder }: NumberFieldProps) {
   return (
-    <label className={`grid gap-1 ${className}`}>
-      <span className="text-sm">{label}</span>
+    <label className={`flex flex-col gap-1.5 ${className}`}>
+      <span className="text-xs font-bold opacity-70 ml-1">{label}</span>
       <input
         inputMode="decimal"
         type="number"
         value={value ?? ''}
+        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
-        className="w-full min-w-0 rounded-lg border border-black/10 dark:border-white/20 bg-transparent px-3 py-2 text-right
-                   focus-visible:outline-none focus:ring-2 focus:ring-foreground/40"
+        className="w-full bg-gray-50 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-xl px-4 py-3 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-shadow"
         step="0.01"
       />
-      {hint && <span className="text-xs opacity-70">{hint}</span>}
+      {hint && <span className="text-[10px] opacity-50 px-1 leading-tight">{hint}</span>}
     </label>
   );
 }
 
-// MeasurementField = שדה מדידה עם תמונה + אייקון הסבר
-function MeasurementField({
-  label,
-  value,
-  onChange,
-  helpTitle,
-  helpText,
-  imageSrc,
-  recommended = false,
-}: {
+interface RadioTileProps {
+  name: string;
+  checked: boolean;
+  onChange: () => void;
+  title: string;
+  subtitle?: string;
+  icon: string;
+}
+
+function RadioTile({ name, checked, onChange, title, subtitle, icon }: RadioTileProps) {
+  return (
+    <label
+      className={`relative flex flex-col p-4 rounded-2xl border cursor-pointer transition-all ${
+        checked 
+          ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 ring-1 ring-indigo-500/20' 
+          : 'border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5'
+      }`}
+    >
+      <input type="radio" name={name} checked={checked} onChange={onChange} className="sr-only" />
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-lg">{icon}</span>
+        <div className={`font-bold text-sm ${checked ? 'text-indigo-900 dark:text-indigo-100' : ''}`}>{title}</div>
+      </div>
+      <div className="text-xs opacity-60 leading-snug pr-7">{subtitle}</div>
+      {checked && (
+        <div className="absolute top-4 left-4 text-indigo-500">
+           <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
+        </div>
+      )}
+    </label>
+  );
+}
+
+interface MeasurementFieldProps {
   label: string;
   value: number | null;
   onChange: (v: number | null) => void;
@@ -1024,136 +917,59 @@ function MeasurementField({
   helpText: string;
   imageSrc: string;
   recommended?: boolean;
-}) {
+  unit?: string;
+}
+
+// Measurement Field with visual cue
+function MeasurementField({ label, value, onChange, helpTitle, helpText, imageSrc, recommended = false, unit = 'cm' }: MeasurementFieldProps) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="grid gap-2 rounded-lg ring-1 ring-black/10 dark:ring-white/10 p-2">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">{label}</span>
-        <div className="flex items-center gap-1">
-          {recommended && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-foreground/10 text-foreground">
-              מומלץ לנשים
-            </span>
-          )}
-          <button
-            type="button"
-            aria-label="מידע"
-            onClick={() => setOpen((o) => !o)}
-            className="relative rounded-full w-6 h-6 text-xs flex items-center justify-center ring-1 ring-black/10 dark:ring-white/20 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
-            title="הסבר קצר"
-          >
-            ⓘ
-            {open && (
-              <div
-                className="absolute z-20 top-full mt-2 right-0 w-64 rounded-md bg-background ring-1 ring-black/10 dark:ring-white/10 p-3 shadow-lg"
-                role="dialog"
-              >
-                <div className="text-xs font-semibold mb-1">{helpTitle}</div>
-                <div className="text-xs opacity-80 leading-relaxed">{helpText}</div>
-              </div>
-            )}
-          </button>
+    <div className="flex flex-col bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-2xl p-2 relative group">
+      
+      <div className="flex justify-between items-start mb-2 px-1">
+        <div className="flex flex-col">
+          <span className="text-[11px] font-bold opacity-80">{label}</span>
+          {recommended && <span className="text-[9px] text-pink-500 font-bold tracking-tight">מומלץ לנשים</span>}
         </div>
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="w-5 h-5 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center text-[10px] opacity-50 hover:opacity-100 transition-opacity"
+        >
+          ?
+        </button>
       </div>
 
-      {/* חדש: תמיד תמונה מעל, קלט מתחת. תמונה מלאה כדי שלא תהיה קטנה מדי */}
-      <div className="grid gap-3">
-        <img
-          src={imageSrc}
-          alt={`הדגמה: ${label}`}
-          className="w-full rounded-md object-cover aspect-[4/3] md:aspect-[3/2]"
-          loading="lazy"
-        />
+      <div className="relative w-full aspect-square rounded-xl overflow-hidden mb-2 border border-black/5 dark:border-white/5 bg-white mix-blend-multiply dark:mix-blend-normal">
+         {/* eslint-disable-next-line @next/next/no-img-element */}
+         <img src={imageSrc} alt={label} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" loading="lazy" />
+         
+         {/* Tooltip Overlay */}
+         {open && (
+           <div className="absolute inset-0 bg-black/80 backdrop-blur-sm p-3 flex flex-col justify-center text-white text-right animate-in fade-in z-10" onClick={()=>setOpen(false)}>
+             <div className="text-xs font-bold text-indigo-300 mb-1">{helpTitle}</div>
+             <div className="text-[10px] leading-relaxed opacity-90">{helpText}</div>
+           </div>
+         )}
+      </div>
+
+      <div className="relative">
         <input
           inputMode="decimal"
           type="number"
           value={value ?? ''}
           onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
-          className="w-full min-w-0 rounded-lg border border-black/10 dark:border-white/20 bg-transparent px-3 py-2 text-right
-                     focus-visible:outline-none focus:ring-2 focus:ring-foreground/40"
+          className="w-full bg-white dark:bg-neutral-800 border border-black/10 dark:border-white/10 rounded-xl pl-6 pr-3 py-2 text-sm font-bold tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+          placeholder="—"
           step="0.01"
         />
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold opacity-40 pointer-events-none">{unit}</span>
       </div>
     </div>
   );
 }
 
-function SelectField({
-  label,
-  value,
-  onChange,
-  options,
-  className = '',
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-  className?: string;
-}) {
-  return (
-    <label className={`grid gap-1 ${className}`}>
-      <span className="text-sm">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full min-w-0 rounded-lg border border-black/10 dark:border-white/20 bg-transparent px-3 py-2 text-right
-                   focus-visible:outline-none focus:ring-2 focus:ring-foreground/40"
-      >
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-// ===== SECTION 7 END =====
-
-/* Keep table cells consistent with app design */
-function Th({ children }: { children: React.ReactNode }) {
-  return <th className="px-3 py-2 font-semibold whitespace-nowrap">{children}</th>;
-}
-function Td({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <td className={`px-3 py-2 whitespace-nowrap ${className}`}>{children}</td>;
-}
-// ===== SECTION 8 END =====
-
-// ===== SECTION 9 TITLE: Radio Tile (Activity) =====
-function RadioTile({
-  name,
-  checked,
-  onChange,
-  title,
-  subtitle,
-}: {
-  name: string;
-  checked: boolean;
-  onChange: () => void;
-  title: string;
-  subtitle?: string;
-}) {
-  return (
-    <label
-      className={`rounded-lg border px-3 py-2 cursor-pointer ${
-        checked ? 'border-foreground' : 'border-black/10 dark:border-white/20'
-      }`}
-    >
-      <div className="flex items-start gap-3">
-        <input type="radio" name={name} checked={checked} onChange={onChange} className="mt-1" />
-        <div>
-          <div className="font-medium">{title}</div>
-          {subtitle && <div className="text-xs opacity-70">{subtitle}</div>}
-        </div>
-      </div>
-    </label>
-  );
-}
-// ===== SECTION 9 END =====
-
-// ===== SECTION 10 TITLE: Utils =====
+// ===== SECTION 6 TITLE: Utils =====
 function toNumOrNull(v: any): number | null {
   if (v === '' || v === null || typeof v === 'undefined') return null;
   const n = Number(v);
@@ -1165,4 +981,4 @@ function emptyToNull(v: any) {
 function num(v: number | null | undefined) {
   return v === null || typeof v === 'undefined' ? '' : String(v);
 }
-// ===== SECTION 10 END =====
+// ===== SECTION 6 END =====

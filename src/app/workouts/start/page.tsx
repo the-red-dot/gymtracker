@@ -118,34 +118,42 @@ export default function StartWorkoutPage() {
   const [isEditingVideo, setIsEditingVideo] = useState(false);
   const [savingVideo, setSavingVideo] = useState(false);
 
-  // Helper to convert media links (YouTube/Shorts, X/Twitter, TikTok) to Embed links with their Aspect Ratio
+  // Helper to convert media links (YouTube/Shorts, X/Twitter, TikTok) to Embed links with their Aspect Ratio + Looping
   const getMediaEmbedInfo = (url: string) => {
     if (!url) return null;
-    
-    // 1. YouTube Shorts (Vertical)
-    const ytShortsMatch = url.match(/youtube\.com\/shorts\/([\w-]{11})/i);
-    if (ytShortsMatch) {
-      return { type: 'youtube-shorts', url: `https://www.youtube.com/embed/${ytShortsMatch[1]}`, ratio: '9/16' };
-    }
+    try {
+      const lowerUrl = url.toLowerCase();
+      
+      // 1. YouTube Shorts (Vertical) - Added autoplay, mute, and loop+playlist params
+      if (lowerUrl.includes('/shorts/')) {
+        const idMatch = url.match(/\/shorts\/([\w-]{11})/i);
+        if (idMatch) return { type: 'youtube-shorts', url: `https://www.youtube.com/embed/${idMatch[1]}?autoplay=1&mute=1&loop=1&playlist=${idMatch[1]}`, ratio: '9/16' };
+      }
+      
+      // 2. YouTube Standard (Horizontal) - Added autoplay, mute, and loop+playlist params
+      if (lowerUrl.includes('youtu.be/')) {
+        const idMatch = url.match(/youtu\.be\/([\w-]{11})/i);
+        if (idMatch) return { type: 'youtube', url: `https://www.youtube.com/embed/${idMatch[1]}?autoplay=1&mute=1&loop=1&playlist=${idMatch[1]}`, ratio: '16/9' };
+      } else if (lowerUrl.includes('watch') || lowerUrl.includes('/embed/')) {
+        const idMatch = url.match(/(?:v=|embed\/)([\w-]{11})/i);
+        if (idMatch) return { type: 'youtube', url: `https://www.youtube.com/embed/${idMatch[1]}?autoplay=1&mute=1&loop=1&playlist=${idMatch[1]}`, ratio: '16/9' };
+      }
 
-    // 2. YouTube Standard (Horizontal)
-    const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/i);
-    if (ytMatch) {
-      return { type: 'youtube', url: `https://www.youtube.com/embed/${ytMatch[1]}`, ratio: '16/9' };
-    }
-    
-    // 3. X / Twitter
-    const xMatch = url.match(/(?:x\.com|twitter\.com)\/(?:#!\/)?(?:\w+\/status(?:es)?|i\/status)\/(\d+)/i);
-    if (xMatch) {
-      return { type: 'twitter', url: `https://platform.twitter.com/embed/Tweet.html?id=${xMatch[1]}`, ratio: 'auto' };
-    }
-    
-    // 4. TikTok (Vertical - Standard format)
-    const tkMatch = url.match(/tiktok\.com\/(?:@[^\/]+\/video\/|v\/)(\d+)/i);
-    if (tkMatch) {
-      return { type: 'tiktok', url: `https://www.tiktok.com/embed/v2/${tkMatch[1]}`, ratio: '9/16' };
-    }
+      // 3. X / Twitter
+      if (lowerUrl.includes('x.com/') || lowerUrl.includes('twitter.com/')) {
+        const statusMatch = url.match(/\/status\/(\d+)/i);
+        if (statusMatch) return { type: 'twitter', url: `https://platform.twitter.com/embed/Tweet.html?id=${statusMatch[1]}`, ratio: 'auto' };
+      }
 
+      // 4. TikTok (Vertical)
+      if (lowerUrl.includes('tiktok.com/')) {
+        const tkMatch = url.match(/\/video\/(\d+)/i);
+        // TikTok auto-loops by default in its embed player
+        if (tkMatch) return { type: 'tiktok', url: `https://www.tiktok.com/embed/v2/${tkMatch[1]}`, ratio: '9/16' };
+      }
+    } catch (e) {
+      console.error("Error parsing media URL", e);
+    }
     return null;
   };
 
@@ -162,7 +170,7 @@ export default function StartWorkoutPage() {
       
     setSavingVideo(false);
     if (err) {
-      alert('שגיאה בשמירת הסרטון: ' + err.message);
+      alert('שגיאה בשמירת הסרטון (ודא שהפעלת הרשאות UPDATE במסד הנתונים): ' + err.message);
       return;
     }
     
@@ -1361,27 +1369,28 @@ export default function StartWorkoutPage() {
               ) : (
                 <div className="space-y-4 flex flex-col items-center">
                   <div 
-                     className="w-full flex justify-center items-center rounded-xl overflow-hidden bg-black ring-1 ring-black/10 dark:ring-white/10 relative" 
-                     style={{ maxHeight: '65vh', minHeight: '200px' }}
+                     className="w-full flex justify-center items-center rounded-xl overflow-hidden bg-black/5 dark:bg-white/5 py-4 px-2 relative" 
                   >
                     {embedInfo ? (
                       <iframe 
                         src={embedInfo.url} 
-                        className="w-full h-full"
+                        className="rounded-lg shadow-lg bg-black"
                         style={{ 
                           aspectRatio: embedInfo.ratio !== 'auto' ? embedInfo.ratio : undefined,
+                          width: embedInfo.ratio === '9/16' ? 'auto' : '100%',
+                          height: embedInfo.ratio === '9/16' ? '60vh' : (embedInfo.ratio === 'auto' ? '60vh' : 'auto'),
+                          maxWidth: '100%',
                           maxHeight: '65vh',
-                          maxWidth: embedMaxWidth,
-                          minHeight: embedInfo.ratio === 'auto' ? '60vh' : undefined
+                          minHeight: embedInfo.ratio === 'auto' ? '400px' : undefined
                         }}
                         allowFullScreen
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                       ></iframe>
                     ) : (
-                      <div className="flex flex-col items-center justify-center h-48 w-full text-white/70 text-sm p-4 text-center">
+                      <div className="flex flex-col items-center justify-center h-48 w-full text-foreground/70 text-sm p-4 text-center">
                         <span>לא ניתן להטמיע את הקישור במערכת.</span>
                         <span>ודא שזהו קישור תקין ליוטיוב, X, או טיקטוק.</span>
-                        <a href={videoModalEquip.video_url} target="_blank" rel="noreferrer" className="text-blue-400 font-bold underline mt-3 block">פתח קישור בדפדפן</a>
+                        <a href={videoModalEquip.video_url} target="_blank" rel="noreferrer" className="text-blue-500 font-bold underline mt-3 block">פתח קישור בדפדפן</a>
                       </div>
                     )}
                   </div>
