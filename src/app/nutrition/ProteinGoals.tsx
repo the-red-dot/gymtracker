@@ -1,4 +1,4 @@
-// gym-tracker-app/src/app/nutrition/ProteinGoals.tsx
+// src/app/nutrition/ProteinGoals.tsx
 'use client';
 
 /* ========= SECTION 1 — Imports ========= */
@@ -307,7 +307,7 @@ export default function ProteinGoals({
     if (typeof window !== 'undefined') localStorage.setItem('protein_gpk', String(gpk));
   }, [gpk]);
 
-  // שמירה ל-DB (Debounce) — UPSERT לפי user_id (כמו בגרסה שעבדה)
+  // שמירה ל-DB (Debounce) — UPSERT לפי user_id
   useEffect(() => {
     if (loadingSettings || !currentUserId) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -347,8 +347,9 @@ export default function ProteinGoals({
   const consumed = Number.isFinite(proteinToday) ? proteinToday : 0;
   const pct = targetAbs && targetAbs > 0 ? Math.max(0, Math.min(100, (consumed / targetAbs) * 100)) : 0;
   const remain = targetAbs != null ? round2(targetAbs - consumed) : null;
+  const isOver = targetAbs != null && consumed > targetAbs;
 
-  // per-meal cue (0.30–0.40 g/kg per meal) — לפי הבסיס שנבחר אוטומטית
+  // per-meal cue (0.30–0.40 g/kg per meal)
   const perMealLow = round2(0.30 * (basisKg ?? 0));
   const perMealHigh = round2(0.40 * (basisKg ?? 0));
 
@@ -357,138 +358,162 @@ export default function ProteinGoals({
 
   /* ----- 4.6 Render ----- */
   return (
-    <SectionCard title="יעד חלבון יומי — שקוף ומותאם אישית">
+    <div className="space-y-5 animate-in fade-in duration-300">
       {loadingBase ? (
-        <div className="text-sm opacity-70">טוען נתונים…</div>
+        <div className="text-sm opacity-70 p-4 text-center">טוען נתונים…</div>
       ) : !weight ? (
-        <div className="text-sm text-amber-700 dark:text-amber-300">
-          לא נמצא משקל עדכני. הוסף/י משקל בטבלת <b>body_measurements</b> או בפרופיל כדי לחשב יעד חלבון.
+        <div className="p-4 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 rounded-2xl text-sm text-center border border-amber-200 dark:border-amber-800/30">
+          לא נמצא משקל עדכני. הוסף/י משקל בטבלת <b>מדידות מעקב</b> או בפרופיל כדי לחשב יעד חלבון.
         </div>
       ) : (
-        <div className="grid gap-6">
-          {/* KPI Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <KPI
-              label="משקל מקור"
-              value={`${round2(weight)} ק״ג`}
-              hint={
-                weightSource === 'measurement'
-                  ? `מ־body_measurements${weightAt ? ` · ${new Date(weightAt).toLocaleDateString('he-IL')}` : ''}`
-                  : weightSource === 'profile'
-                  ? 'מהפרופיל (מומלץ לעדכן מדידה)'
-                  : undefined
-              }
-            />
-            <KPI
-              label="% שומן בשימוש"
-              value={bfAuto.bf != null ? `${round2(bfAuto.bf)}%` : '—'}
-              hint={bfAuto.explain}
-            />
-            <KPI label="בסיס לחישוב" value={basisLabel} hint={basisExplain} />
-            <KPI
-              label="יעד חלבון"
-              value={targetAbs != null ? `${targetAbs} ג׳` : '—'}
-              hint={`טווח מומלץ: ${band.min}–${band.max} g/kg (${band.label})`}
-            />
-          </div>
-
-          {/* Controls: רק סליידר g/kg */}
-          <div className="rounded-xl p-4 ring-1 ring-black/10 dark:ring-white/10 bg-gradient-to-br from-white to-black/[.02] dark:from-neutral-900 dark:to-neutral-800">
-            <div className="flex items-center justify-between text-sm">
-              <div className="font-medium">בחר/י יעד אישי — גרם לק״ג (לפי הבסיס האוטומטי)</div>
-              <div className="opacity-70">
-                {round2(gpk)} g/kg {savingSettings === 'saving' ? '· שומר…' : savingSettings === 'error' ? '· שמירה נכשלה (נשמר מקומית)' : ''}
-              </div>
-            </div>
-            <div className="mt-1 text-xs opacity-80">
-              מומלץ למטרה שלך: <b>{band.min}–{band.max} g/kg</b> ({band.label})
-            </div>
-            <input
-              type="range"
-              min={0.8}
-              max={2.4}
-              step={0.1}
-              value={gpk}
-              onChange={(e) => setGpk(Number(e.target.value))}
-              className="w-full mt-3"
-              aria-label="סליידר יעד חלבון (g/kg)"
-              disabled={loadingSettings}
-            />
-            <div className="flex justify-between text-xs opacity-70">
-              <span>0.8</span><span>1.2</span><span>1.6</span><span>2.0</span><span>2.4</span>
-            </div>
-
-            {/* Calculation breakdown */}
-            <div className="mt-4 text-xs opacity-80">
-              {basisKg != null && targetAbs != null ? (
-                <>
-                  חישוב: <b>{basisLabel}</b> = <b>{round2(basisKg)} ק״ג</b> · <b>{round2(gpk)} g/kg</b> ⇒ <b>{targetAbs} ג׳/יום</b>. {basisExplain}
-                </>
-              ) : (
-                'אין בסיס חוקי לחישוב כרגע.'
-              )}
-            </div>
-
-            {/* Progress */}
-            <div className="mt-4">
-              <div className="flex items-center justify-between text-sm">
-                <div className="font-medium">התקדמות היום לעבר היעד</div>
-                <div className="opacity-70">{targetAbs != null ? `${round2(consumed)} / ${targetAbs} ג׳` : '—'}</div>
-              </div>
-              <div className="mt-2 h-3 w-full rounded-full bg-black/10 dark:bg-white/10 overflow-hidden" aria-label="התקדמות חלבון">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600 dark:from-emerald-500 dark:to-emerald-400 transition-[width]"
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-              {remain != null && (
-                <div className="mt-2 text-xs opacity-80">{remain >= 0 ? `נותרו ${remain} ג׳ היום.` : `חריגה של ${Math.abs(remain)} ג׳.`}</div>
-              )}
-            </div>
-
-            {/* Coaching / Risk */}
-            <RiskBox items={risk.items} legend={risk.legend} />
-
-            {/* Per-meal cue */}
-            <div className="mt-3 text-xs opacity-70">
-              טיפ פריסה: 0.30–0.40 g/kg (לפי הבסיס האוטומטי) לכל ארוחה ⇒ אצלך ≈ {perMealLow}–{perMealHigh} ג׳ לארוחה (3–5 ארוחות).
-            </div>
-
-            {/* עזרה: איך לקבל %שומן בלי מכשיר */}
-            <details className="mt-4 text-xs">
-              <summary className="cursor-pointer font-medium">אין מכשיר %שומן? כך תקבל/י חישוב אוטומטי</summary>
-              <div className="mt-2 space-y-1">
-                <div>השלמת שדות במדידה עוזרת לנו לחשב %שומן לפי נוסחת Navy:</div>
-                <ul className="list-disc pr-5 space-y-1">
-                  <li><b>height_cm</b> — גובה בס״מ (מהפרופיל).</li>
-                  <li><b>neck_cm</b> — היקף צוואר.</li>
-                  <li><b>waist_navel_cm</b> (מועדף) או <b>waist_cm</b> / <b>waist_narrow_cm</b> — היקף מותן.</li>
-                  <li>לנשים גם <b>hips_cm</b> — היקף אגן.</li>
-                </ul>
-                <div className="opacity-70">
-                  אם תמלא/י את ההיקפים — נחשב %שומן אוטומטית ונשתמש ב-LBM; אם קיים גם ערך ידני <b>body_fat_percent</b> — הוא יגבר.
+        <>
+          {/* 1. Main Dashboard Card */}
+          <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[28px] p-6 text-white shadow-xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-40 h-40 bg-white opacity-[0.03] rounded-full blur-2xl -mr-16 -mt-16 pointer-events-none"></div>
+            <div className="absolute bottom-0 left-0 w-32 h-32 bg-black opacity-10 rounded-full blur-3xl -ml-8 -mb-8 pointer-events-none"></div>
+            
+            <div className="relative z-10">
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h2 className="text-blue-100 font-medium text-sm tracking-wide">חלבון היום</h2>
+                  <div className="flex items-baseline gap-2 mt-0.5">
+                    <span className="text-4xl md:text-5xl font-extrabold tracking-tight tabular-nums">{round2(consumed)}</span>
+                    <span className="text-blue-200 font-medium opacity-80">/ {targetAbs ?? '—'} ג׳</span>
+                  </div>
+                </div>
+                <div className="bg-white/10 backdrop-blur-md border border-white/10 px-3 py-1.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1.5">
+                   🥩 מטרה: {band.label}
                 </div>
               </div>
-            </details>
 
-            {/* Evidence */}
-            <details className="mt-4 text-xs">
-              <summary className="cursor-pointer font-medium">מקורות/מחקרים שעליהם מבוסס החישוב</summary>
-              <ul className="mt-2 space-y-1 list-disc pr-5">
-                {EVIDENCE.map((s, i) => (
-                  <li key={i}>
-                    <a href={s.href} target="_blank" rel="noreferrer" className="underline">
-                      {s.title}
-                    </a>
-                    {s.note ? <> — <span className="opacity-80">{s.note}</span></> : null}
-                  </li>
-                ))}
-              </ul>
-            </details>
+              <div className="space-y-2.5">
+                <div className="flex justify-between text-sm font-medium text-blue-100">
+                  <span>{remain != null ? (remain >= 0 ? `נותרו ${remain} ג׳` : `עברת ב-${Math.abs(remain)} ג׳`) : '—'}</span>
+                  <span className="font-bold">{Math.round(pct)}%</span>
+                </div>
+                <div className="h-3 w-full bg-black/20 rounded-full overflow-hidden p-0.5 shadow-inner">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-700 ease-out shadow-sm ${isOver ? 'bg-emerald-400' : 'bg-white'}`} 
+                    style={{ width: `${pct}%` }} 
+                  />
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
+
+          {/* 2. Top Level KPIs */}
+          <div className="grid grid-cols-2 gap-3">
+             <KPI 
+               label="משקל בשימוש" 
+               value={`${round2(weight)} ק״ג`} 
+               hint={weightSource === 'measurement' && weightAt ? new Date(weightAt).toLocaleDateString('he-IL') : 'מפרופיל'} 
+             />
+             <KPI 
+               label="% שומן בשימוש" 
+               value={bfAuto.bf != null ? `${round2(bfAuto.bf)}%` : '—'} 
+               hint={bfAuto.bf != null ? basisLabel : 'חסר נתון'} 
+             />
+          </div>
+
+          {/* 3. Advanced Settings Accordion */}
+          <details className="group bg-white dark:bg-neutral-800 rounded-2xl ring-1 ring-black/5 dark:ring-white/5 shadow-sm overflow-hidden transition-all">
+            <summary className="p-4 flex items-center justify-between cursor-pointer font-semibold text-sm select-none hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+                </div>
+                התאמת יעד והסברים מחקריים
+              </div>
+              <span className="transition-transform group-open:rotate-180 opacity-50">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+              </span>
+            </summary>
+            
+            <div className="p-4 pt-2 border-t border-black/5 dark:border-white/5 space-y-5">
+              
+              {/* Slider Card */}
+              <div className="bg-black/[0.03] dark:bg-white/[0.03] rounded-xl p-4 border border-black/5 dark:border-white/5">
+                <div className="flex items-center justify-between text-sm mb-4">
+                  <span className="font-bold flex items-center gap-2">
+                    <span className="opacity-70">🎯</span> התאמה אישית (g/kg)
+                  </span>
+                  <span className="bg-white dark:bg-neutral-800 px-2.5 py-1 rounded-md text-xs font-mono font-bold shadow-sm border border-black/5 dark:border-white/5">
+                    {round2(gpk)} g/kg
+                  </span>
+                </div>
+                
+                <input
+                  type="range"
+                  min={0.8} max={2.4} step={0.1}
+                  value={gpk}
+                  onChange={(e) => setGpk(Number(e.target.value))}
+                  className="w-full accent-blue-600 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                  disabled={loadingSettings}
+                />
+                
+                <div className="flex justify-between text-[10px] opacity-50 mt-2 font-mono tracking-wider">
+                  <span>0.8</span>
+                  <span>1.6</span>
+                  <span>2.4</span>
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/5 text-xs opacity-80 leading-relaxed">
+                  {basisKg != null && targetAbs != null ? (
+                    <>
+                      חישוב היעד: <b>{basisLabel}</b> ({round2(basisKg)} ק״ג) × <b>{round2(gpk)}</b> = <b>{targetAbs} ג׳ ביום.</b>
+                      <div className="mt-1 opacity-70 italic">{basisExplain}</div>
+                    </>
+                  ) : (
+                    'לא ניתן לחשב יעד כרגע בגלל חוסר בנתונים.'
+                  )}
+                </div>
+
+                {savingSettings === 'error' && <div className="mt-2 text-[10px] text-red-500">שמירה בענן נכשלה (נשמר מקומית)</div>}
+              </div>
+
+              <RiskBox items={risk.items} legend={risk.legend} />
+
+              <div className="bg-blue-50 dark:bg-blue-900/10 p-3 rounded-xl border border-blue-100 dark:border-blue-900/20 text-xs text-blue-800 dark:text-blue-300">
+                <b>💡 טיפ חלוקה בארוחות:</b>
+                <br/>
+                מומלץ לחלק את החלבון ל-3-5 ארוחות. למשקל שלך מומלץ לאכול כ־<b>{perMealLow}–{perMealHigh} ג׳</b> חלבון לארוחה כדי למקסם סינתזת חלבון שריר (MPS).
+              </div>
+
+              {/* עזרה: Navy Method */}
+              <div className="space-y-2 pt-2">
+                <p className="text-sm font-bold opacity-90">איך לקבל %שומן מדויק יותר?</p>
+                <div className="text-xs opacity-80 leading-relaxed space-y-1">
+                  השלמת שדות בטבלת המדידות תאפשר לנו לחשב %שומן לפי נוסחת Navy האמריקאית:
+                  <ul className="list-disc pr-4 mt-1 space-y-0.5">
+                    <li><b>גובה</b> (מהפרופיל)</li>
+                    <li><b>צוואר</b> (בסיס הצוואר)</li>
+                    <li><b>מותן</b> (בגובה הטבור)</li>
+                    <li>לנשים גם <b>אגן</b> (ירכיים בנקודה הרחבה)</li>
+                  </ul>
+                  הזנת הנתונים האלו משפרת משמעותית את דיוק היעד.
+                </div>
+              </div>
+
+              {/* Evidence */}
+              <div className="pt-2 border-t border-black/5 dark:border-white/5">
+                <p className="text-xs font-bold opacity-70 mb-2 uppercase tracking-wider">ביסוס מחקרי (Evidence)</p>
+                <ul className="space-y-2 text-xs opacity-80">
+                  {EVIDENCE.map((s, i) => (
+                    <li key={i} className="leading-snug">
+                      <a href={s.href} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">
+                        {s.title}
+                      </a>
+                      {s.note && <span className="block opacity-70 mt-0.5">{s.note}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+            </div>
+          </details>
+        </>
       )}
-    </SectionCard>
+    </div>
   );
 }
 
@@ -559,28 +584,26 @@ function proteinCoaching({
 
 function KPI({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
-    <div className="rounded-lg p-3 ring-1 ring-black/10 dark:ring-white/10 bg-black/[.03] dark:bg-white/[.06]">
-      <div className="text-sm opacity-70">{label}</div>
-      <div className="text-lg font-semibold mt-0.5">{value}</div>
-      {hint && <div className="text-xs opacity-70 mt-0.5">{hint}</div>}
+    <div className="flex flex-col bg-gray-50 dark:bg-white/5 rounded-xl p-3 text-center border border-black/5 dark:border-white/5 shadow-sm">
+      <span className="text-[10px] opacity-60 font-bold mb-1 tracking-wider">{label}</span>
+      <span className="text-sm font-bold text-blue-900 dark:text-blue-100">{value}</span>
+      {hint && <span className="text-[9px] opacity-50 mt-1">{hint}</span>}
     </div>
   );
 }
 
 function RiskBox({ items, legend }: ReturnType<typeof proteinCoaching>) {
+  if (!items.length) return null;
   return (
-    <div className="mt-4 rounded-lg p-3 ring-1 ring-black/10 dark:ring-white/10 bg-black/[.03] dark:bg-white/[.06]">
-      <div className="text-sm font-medium mb-1">השלכות/טיפים לבחירה שלך:</div>
-      <ul className="space-y-1 text-sm">
-        {items.map((it, i) => (
-          <li key={i} className="flex items-start gap-2">
-            <span>{legend[it.level]}</span>
-            <span className={it.level === 'danger' ? 'text-red-600' : it.level === 'caution' ? 'text-amber-600' : ''}>
-              {it.text}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <ul className="space-y-2 text-xs">
+      {items.map((it, i) => (
+        <li key={i} className="flex items-start gap-2 leading-snug">
+          <span>{legend[it.level]}</span>
+          <span className={it.level === 'danger' ? 'text-red-600 font-bold' : it.level === 'caution' ? 'text-amber-600 font-medium' : 'opacity-80'}>
+            {it.text}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }

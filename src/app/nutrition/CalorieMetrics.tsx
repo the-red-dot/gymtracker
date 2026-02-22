@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { SectionCard } from './ui';
 import { round2 } from './utils';
 
 /* =========================
@@ -29,12 +28,10 @@ type Profile = {
 };
 type UserGoal = { id: number; goal_key: string; label: string };
 
-// עדכנו את הטיפוס הזה כדי שיכיל נתוני היקפים לחישוב מדויק
 type LatestMeasurement = {
   weightKg: number | null;
-  bodyFatPercent: number | null; // מהמדידה האחרונה בפועל
-  measuredAt: string | null; // ISO
-  // שדות חדשים לחישוב Navy
+  bodyFatPercent: number | null;
+  measuredAt: string | null;
   neck_cm: number | null;
   waist_navel_cm: number | null;
   waist_cm: number | null;
@@ -42,7 +39,7 @@ type LatestMeasurement = {
   hips_cm: number | null;
 };
 
-/* --- Helper: Navy Method Logic (Copied from ProteinGoals to ensure consistency) --- */
+/* --- Helper: Navy Method Logic --- */
 const log10 = (x: number) => Math.log(x) / Math.LN10;
 const toNum = (v: unknown): number | null => {
   if (v == null || v === '') return null;
@@ -101,7 +98,7 @@ export default function CalorieMetrics({
   todayTotals: Totals;
   last7: DayAgg[];
 }) {
-  /* ---------- 1. טעינת מדידה אחרונה (כולל חיפוש אחוז שומן היסטורי) ---------- */
+  /* ---------- 1. טעינת מדידה אחרונה ---------- */
   const [latest, setLatest] = useState<LatestMeasurement>({ 
     weightKg: null, bodyFatPercent: null, measuredAt: null,
     neck_cm: null, waist_navel_cm: null, waist_cm: null, waist_narrow_cm: null, hips_cm: null
@@ -120,26 +117,17 @@ export default function CalorieMetrics({
         }
         if (!uid) { setLoadingLatest(false); return; }
 
-        // A. שאילתה ראשית: המדידה האחרונה ביותר (בשביל משקל עדכני והיקפים)
         const p1 = supabase
           .from('body_measurements')
           .select(`
-            weight_kg, 
-            body_fat_percent, 
-            measured_at,
-            neck_cm,
-            waist_cm,
-            waist_navel_cm,
-            waist_narrow_cm,
-            hips_cm
+            weight_kg, body_fat_percent, measured_at,
+            neck_cm, waist_cm, waist_navel_cm, waist_narrow_cm, hips_cm
           `)
           .eq('user_id', uid)
           .order('measured_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
-        // B. שאילתה משנית: אחוז שומן אחרון שאינו NULL (במקרה שהמדידה האחרונה היא רק שקילה)
-        // זה קריטי כדי ליישר קו עם ProteinGoals
         const p2 = supabase
           .from('body_measurements')
           .select('body_fat_percent')
@@ -153,7 +141,6 @@ export default function CalorieMetrics({
 
         if (ignore) return;
         
-        // עיבוד נתונים
         if (!resLatest.error && resLatest.data) {
           const d = resLatest.data;
           setLatest({
@@ -186,42 +173,25 @@ export default function CalorieMetrics({
     return () => { ignore = true; };
   }, [profile?.user_id]);
 
-  /* ---------- 2. חישוב נתוני בסיס חכמים (עקביים ל-ProteinGoals) ---------- */
+  /* ---------- 2. חישוב נתוני בסיס חכמים ---------- */
   const gender = (profile?.gender ?? 'unspecified') as Gender;
   const heightCm = profile?.height_cm ?? null;
   const weight = latest.weightKg ?? profile?.weight_kg ?? null;
   const ageYears = getAgeYears(profile);
 
-  // סדר קדימויות ל-BF:
-  // 1. מדידה ידנית ברשומה האחרונה
-  // 2. מדידה ידנית היסטורית
-  // 3. פרופיל
-  // 4. חישוב Navy מהיקפים
   const calculatedBf = useMemo(() => {
     const manual = latest.bodyFatPercent ?? latestManualBf ?? profile?.body_fat_percent;
     if (manual != null) return manual;
-    
     const waistLike = latest.waist_navel_cm ?? latest.waist_cm ?? latest.waist_narrow_cm;
-    
     return estimateBfFromTape({
-      gender,
-      height_cm: heightCm,
-      neck_cm: latest.neck_cm,
-      waist_cm_like: waistLike,
-      hips_cm: latest.hips_cm,
+      gender, height_cm: heightCm, neck_cm: latest.neck_cm, waist_cm_like: waistLike, hips_cm: latest.hips_cm,
     });
   }, [latest, latestManualBf, profile?.body_fat_percent, gender, heightCm]);
 
-  // fallback סופי
   const bf = calculatedBf ?? null;
   
-  // חישוב BMR
   const bmr = calcBMR({
-    weightKg: weight,
-    heightCm,
-    ageYears,
-    bfPercent: typeof bf === 'number' ? bf : null,
-    gender,
+    weightKg: weight, heightCm, ageYears, bfPercent: typeof bf === 'number' ? bf : null, gender,
   });
 
   /* ---------- דגל יום מנוחה להיום ---------- */
@@ -237,9 +207,7 @@ export default function CalorieMetrics({
         if (!uid) return;
 
         const d = new Date();
-        const dayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-          d.getDate()
-        ).padStart(2, '0')}`;
+        const dayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
         const { data } = await supabase
           .from('user_day_status')
@@ -306,10 +274,8 @@ export default function CalorieMetrics({
     return () => { ignore = true; };
   }, [currentUserId, defaultPctFromGoals]);
 
-  // שמירת אחוז הגרעון (הגדרות משתמש)
   useEffect(() => {
-    if (loadingPct) return;
-    if (!currentUserId) return;
+    if (loadingPct || !currentUserId) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
 
     saveTimer.current = setTimeout(async () => {
@@ -329,7 +295,6 @@ export default function CalorieMetrics({
   }, [pct, currentUserId, loadingPct]);
 
   /* ---------- Protein g/kg (Persisted + LocalStorage Check) ---------- */
-  // עדכון קריטי: בדיקת localStorage כדי לקבל את הערך שהוגדר בטאב השני מיידית
   const [gpk, setGpk] = useState<number | null>(() => {
     if (typeof window !== 'undefined') {
       const ls = localStorage.getItem('protein_gpk');
@@ -338,7 +303,6 @@ export default function CalorieMetrics({
     return null;
   });
   const [loadingGpk, setLoadingGpk] = useState<boolean>(true);
-
   const hasBf = typeof bf === 'number' && bf >= 0 && bf <= 60;
 
   useEffect(() => {
@@ -351,12 +315,7 @@ export default function CalorieMetrics({
           const { data } = await supabase.auth.getSession();
           uid = data.session?.user?.id;
         }
-        
-        if (!uid) { 
-          setGpk(prev => prev ?? fallback); 
-          setLoadingGpk(false); 
-          return; 
-        }
+        if (!uid) { setGpk(prev => prev ?? fallback); setLoadingGpk(false); return; }
 
         const { data, error } = await supabase
           .from('user_protein_settings')
@@ -365,11 +324,9 @@ export default function CalorieMetrics({
           .maybeSingle();
 
         if (ignore) return;
-        
         if (!error && data && Number.isFinite(Number(data.grams_per_kg))) {
           const val = Number(data.grams_per_kg);
           setGpk(val);
-          // מסנכרנים את ה-LS גם מכאן
           if (typeof window !== 'undefined') localStorage.setItem('protein_gpk', String(val));
         } else {
           setGpk(prev => prev ?? fallback);
@@ -381,7 +338,7 @@ export default function CalorieMetrics({
     return () => { ignore = true; };
   }, [profile?.user_id, goals, bf, hasBf]);
 
-  /* ---------- Guardrails ---------- */
+  /* ---------- Guardrails & Macros ---------- */
   const hardFloor = useMemo(() => {
     const sexFloor = gender === 'female' ? 1200 : gender === 'male' ? 1500 : 1400;
     const bmrFloor = bmr ? 0.8 * bmr : 0;
@@ -391,67 +348,43 @@ export default function CalorieMetrics({
 
   const { targetCalories, delta, modeLabel } = usePlanTargetWithPct({ tdee, pct, hardFloor });
 
-  /* ---------- היום + היסטוריה ---------- */
   const calsToday = todayTotals.calories ?? 0;
   const p = todayTotals.protein_g ?? 0;
   const c = todayTotals.carbs_g ?? 0;
   const f = todayTotals.fat_g ?? 0;
 
-  const kcalFromMacros = p * 4 + c * 4 + f * 9;
-
-  const avg7 =
-    last7.length > 0 ? round2(last7.reduce((s, d) => s + (d.totals.calories ?? 0), 0) / last7.length) : 0;
-
-  const maxDay = last7.reduce(
-    (best, d) => ((d.totals.calories ?? 0) > (best?.totals.calories ?? -1) ? d : best),
-    null as DayAgg | null
-  );
-
-  const progressPct =
-    targetCalories && targetCalories > 0 ? Math.max(0, Math.min(100, (calsToday / targetCalories) * 100)) : 0;
-
+  const avg7 = last7.length > 0 ? round2(last7.reduce((s, d) => s + (d.totals.calories ?? 0), 0) / last7.length) : 0;
+  
+  const progressPct = targetCalories && targetCalories > 0 ? Math.max(0, Math.min(100, (calsToday / targetCalories) * 100)) : 0;
   const remain = targetCalories != null ? round2(targetCalories - calsToday) : null;
   const remainText = remain == null ? '—' : remain >= 0 ? `נותרו ${remain} קק״ל` : `חריגה של ${Math.abs(remain)} קק״ל`;
 
   const risk = riskAssessment({ pct, bmr, tdee, targetCalories, hardFloor, gender });
 
-  /* ---------- Macro targets (THE FIX IS HERE) ---------- */
   const macroTargets = useMemo(() => {
     if (!targetCalories || !weight) return null;
-
     const hasBf = typeof bf === 'number' && bf >= 0 && bf <= 60;
     const lbm = hasBf ? weight * (1 - (bf as number) / 100) : null;
-    
-    // בסיס החישוב: אם יש מסה רזה (LBM) משתמשים בה, אחרת במשקל כולל
     const basisKg = lbm ?? weight;
-
-    // כאן usedGpk יקבל את הערך הנכון (מ-LS או מה-DB) שזהה לטאב השני
     const usedGpk = (gpk ?? defaultGpkFromGoals(goals, hasBf ? (bf as number) : null));
 
     const protein_g = round2(basisKg * usedGpk);
     let protein_kcal = protein_g * 4;
 
     const inDeficit = pct >= 10;
-    // TWEAK: הורדתי ל-0.8 בגרעון כדי לאפשר יותר פחמימות לאימונים
     let fatPerKg = inDeficit ? 0.8 : 1.0;
-    
-    // Floor of 0.6g/kg absolute minimum for hormonal health
     fatPerKg = Math.max(fatPerKg, 0.6);       
-    
     if (isRestToday) fatPerKg = round2(fatPerKg * 1.1); 
     
-    // חישוב שומן לפי משקל כולל (סטנדרט)
     let fat_g = round2(weight * fatPerKg);
     let fat_kcal = fat_g * 9;
 
     let remain_kcal = targetCalories - protein_kcal - fat_kcal;
-    // הבטחת מינימום 130ג פחמימות (מוח/ביצועים)
     let carbs_g = round2(Math.max(130, remain_kcal / 4));
     let carbs_kcal = carbs_g * 4;
 
-    // מנגנון "לחץ": אם אין מספיק קלוריות לפחמימות המינימליות, נוריד שומן עד הרצפה
     if (remain_kcal < 130 * 4) {
-      const fatFloor_g = round2(weight * 0.6); // רצפת שומן קשיחה
+      const fatFloor_g = round2(weight * 0.6); 
       const need_kcal = 130 * 4 - remain_kcal;
       const canDropFat_kcal = Math.max(0, (fat_g - fatFloor_g) * 9);
       const drop = Math.min(need_kcal, canDropFat_kcal);
@@ -465,9 +398,7 @@ export default function CalorieMetrics({
     }
 
     return {
-      protein_g, protein_kcal,
-      fat_g, fat_kcal,
-      carbs_g, carbs_kcal,
+      protein_g, protein_kcal, fat_g, fat_kcal, carbs_g, carbs_kcal,
       total_kcal: round2(protein_kcal + fat_kcal + carbs_kcal),
     };
   }, [targetCalories, weight, bf, pct, isRestToday, gpk, goals]);
@@ -481,185 +412,181 @@ export default function CalorieMetrics({
       try {
         const payload = {
           user_id: currentUserId,
-          bmr,
-          tdee,
-          target_calories: targetCalories,
-          target_protein_g: macroTargets.protein_g,
-          target_carbs_g: macroTargets.carbs_g,
-          target_fat_g: macroTargets.fat_g,
-          current_calories: calsToday,
-          current_protein_g: p,
-          current_carbs_g: c,
-          current_fat_g: f,
-          deficit_pct: pct,
-          activity_factor: effectiveFactor,
-          updated_at: new Date().toISOString(),
+          bmr, tdee, target_calories: targetCalories,
+          target_protein_g: macroTargets.protein_g, target_carbs_g: macroTargets.carbs_g, target_fat_g: macroTargets.fat_g,
+          current_calories: calsToday, current_protein_g: p, current_carbs_g: c, current_fat_g: f,
+          deficit_pct: pct, activity_factor: effectiveFactor, updated_at: new Date().toISOString(),
         };
-
         const { error } = await supabase.from('user_nutrition_targets').upsert(payload);
         if (error) console.error('Failed to save nutrition snapshot:', error);
-      } catch (err) {
-        console.error('Exception saving snapshot:', err);
-      }
+      } catch (err) { console.error('Exception saving snapshot:', err); }
     }, 1000); 
 
     return () => clearTimeout(timer);
-  }, [
-    currentUserId, bmr, tdee, targetCalories, macroTargets, pct, effectiveFactor, 
-    loadingLatest, loadingPct, loadingGpk, calsToday, p, c, f
-  ]);
-
-
-  const progressBarClass = useMemo(() => {
-    if (targetCalories == null) return 'bg-gray-400 dark:bg-gray-500';
-    return calsToday <= targetCalories
-      ? 'bg-gradient-to-r from-emerald-400 to-emerald-600 dark:from-emerald-500 dark:to-emerald-400'
-      : 'bg-gradient-to-r from-rose-400 to-rose-600 dark:from-rose-500 dark:to-rose-400';
-  }, [calsToday, targetCalories]);
+  }, [currentUserId, bmr, tdee, targetCalories, macroTargets, pct, effectiveFactor, loadingLatest, loadingPct, loadingGpk, calsToday, p, c, f]);
 
   const usingMeasurement = latest.weightKg != null || latest.bodyFatPercent != null;
   const weightForText = usingMeasurement ? latest.weightKg : profile?.weight_kg;
-  
-  // תצוגת טקסט: אם חושב BF לפי Navy, נציג אותו
-  const bfForText = bf; 
+  const bfForText = bf;
 
   return (
-    <SectionCard title="מדדים קלוריים — יעד יומי, פרוגרס ו־7 ימים">
-      <div className="grid grid-cols-1 gap-4">
-        <div className="rounded-xl p-4 ring-1 ring-black/10 dark:ring-white/10 bg-gradient-to-br from-white to-black/[.02] dark:from-neutral-900 dark:to-neutral-800">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-xs px-2 py-1 rounded bg-black/5 dark:bg-white/10">
-              מצב: {isRestToday ? 'יום מנוחה' : 'יום אימון/רגיל'} · מקדם פעילות: {effectiveFactor} ({actLabel})
-            </div>
-            {savingPct === 'saving' && <div className="text-xs opacity-70">שומר יעד…</div>}
-            {savingPct === 'error' && <div className="text-xs text-red-600">שמירה נכשלה</div>}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <KPI label="BMR — מנוחה" value={bmr != null ? `${bmr} קק״ל` : 'חסר נתון'} hint={bmrHint(profile)} />
-            <KPI label={`TDEE — אפקטיבי (${isRestToday ? 'יום מנוחה' : actLabel})`} value={tdee != null ? `${tdee} קק״ל` : 'חסר נתון'} />
-            <KPI
-              label={`יעד קלורי (${modeLabelForPct(pct)}${modeLabel ? ` · ${modeLabel}` : ''})`}
-              value={targetCalories != null ? `${targetCalories} קק״ל` : 'חסר נתון'}
-              hint={delta != null && tdee != null ? explainDeltaPct(pct, delta, tdee) : undefined}
-            />
-            <KPI
-              label="אכלתי היום"
-              value={`${round2(calsToday)} קק״ל`}
-              hint={`מאקרו ≈ ${round2(kcalFromMacros)} קק״ל${loadingLatest ? ' · טוען מדידה…' : ''}`}
-            />
-          </div>
-
-          <div className="mt-4 grid gap-2">
-            <div className="flex items-center justify-between text-sm">
-              <div className="font-medium">בחר/י גרעון/עודף (בטווח הבטוח)</div>
-              <div className="opacity-70">
-                {pct > 0 ? `גרעון ${pct}%` : pct < 0 ? `עודף ${Math.abs(pct)}%` : 'תחזוקה 0%'}
+    <div className="space-y-5 animate-in fade-in duration-300">
+      
+      {/* 1. Main Dashboard Card (Calories) */}
+      <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-[28px] p-6 text-white shadow-xl relative overflow-hidden">
+        {/* Abstract Background Shapes */}
+        <div className="absolute top-0 right-0 w-48 h-48 bg-white opacity-[0.03] rounded-full blur-2xl -mr-20 -mt-20 pointer-events-none"></div>
+        <div className="absolute bottom-0 left-0 w-40 h-40 bg-black opacity-10 rounded-full blur-3xl -ml-10 -mb-10 pointer-events-none"></div>
+        
+        <div className="relative z-10">
+          <div className="flex justify-between items-start mb-6">
+            <div>
+              <h2 className="text-indigo-100 font-medium text-sm tracking-wide">קלוריות היום</h2>
+              <div className="flex items-baseline gap-2 mt-0.5">
+                <span className="text-4xl md:text-5xl font-extrabold tracking-tight tabular-nums">{round2(calsToday)}</span>
+                <span className="text-indigo-200 font-medium opacity-80">/ {targetCalories ?? '—'}</span>
               </div>
             </div>
-            <input
-              type="range"
-              min={-15}
-              max={30}
-              step={1}
-              value={pct}
-              onChange={(e) => setPct(Number(e.target.value))}
-              className="w-full"
-              aria-label="סליידר גרעון/עודף קלורי"
-              disabled={loadingPct}
-            />
-            <div className="flex justify-between text-xs opacity-70">
-              <span>עודף 15%-</span>
-              <span>תחזוקה</span>
-              <span>גרעון 30%</span>
+            <div className="bg-white/10 backdrop-blur-md border border-white/10 px-3 py-1.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1.5">
+               {isRestToday ? '🛋️ מנוחה' : '🏋️ אימון'}
             </div>
-
-            <RiskBox {...risk} />
           </div>
 
-          <div className="mt-6">
-            <div className="flex items-center justify-between text-sm">
-              <div className="font-medium">התקדמות היום לעבר היעד</div>
-              <div className="opacity-70">
-                {targetCalories != null ? `${round2(calsToday)} / ${targetCalories} קק״ל` : '—'}
-              </div>
+          <div className="space-y-2.5">
+            <div className="flex justify-between text-sm font-medium text-indigo-100">
+              <span>{remainText}</span>
+              <span className="font-bold">{Math.round(progressPct)}%</span>
             </div>
-            <div className="mt-2 h-3 w-full rounded-full bg-black/10 dark:bg-white/10 overflow-hidden" aria-label="התקדמות לעבר היעד הקלורי">
-              <div
-                className={`h-full rounded-full transition-[width] ${progressBarClass}`}
-                style={{ width: `${progressPct}%` }}
+            <div className="h-3 w-full bg-black/20 rounded-full overflow-hidden p-0.5 shadow-inner">
+              <div 
+                className={`h-full rounded-full transition-all duration-700 ease-out shadow-sm ${targetCalories && calsToday > targetCalories ? 'bg-red-400' : 'bg-white'}`} 
+                style={{ width: `${Math.min(100, progressPct)}%` }} 
               />
             </div>
-            <div className="mt-2 text-xs opacity-80">{remainText}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Macros Grid (App Style) */}
+      <div className="grid grid-cols-3 gap-3">
+        <MacroAppCard k="חלבון" consumed={p} target={macroTargets?.protein_g} colorClass="bg-blue-500" />
+        <MacroAppCard k="פחמימה" consumed={c} target={macroTargets?.carbs_g} colorClass="bg-emerald-500" />
+        <MacroAppCard k="שומן" consumed={f} target={macroTargets?.fat_g} colorClass="bg-amber-500" />
+      </div>
+
+      {/* 3. Advanced Settings & Adjustments (Collapsible to save space) */}
+      <details className="group bg-white dark:bg-neutral-800 rounded-2xl ring-1 ring-black/5 dark:ring-white/5 shadow-sm overflow-hidden transition-all">
+        <summary className="p-4 flex items-center justify-between cursor-pointer font-semibold text-sm select-none hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+            </div>
+            הגדרות ויעדים (TDEE, BMR)
+          </div>
+          <span className="transition-transform group-open:rotate-180 opacity-50">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+          </span>
+        </summary>
+        
+        <div className="p-4 pt-2 border-t border-black/5 dark:border-white/5 space-y-5">
+          
+          {/* Base Stats Row */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <KPI label="BMR המנוחה" value={bmr != null ? `${bmr}` : '—'} />
+            <KPI label="TDEE פעילות" value={tdee != null ? `${tdee}` : '—'} />
+            <KPI label="מטרה" value={modeLabelForPct(pct)} />
+            <KPI label="פער ליעד" value={delta != null ? `${delta > 0 ? '+' : ''}${delta}` : '—'} />
           </div>
 
-          <div className="mt-6 grid grid-cols-1 md-grid-cols-3 md:grid-cols-3 gap-3 text-sm">
-            <MacroGoal
-              k="חלבון"
-              consumed_g={p}
-              consumed_kcal={p * 4}
-              target_g={macroTargets?.protein_g ?? 0}
-              target_kcal={macroTargets?.protein_kcal ?? 0}
-            />
-            <MacroGoal
-              k="פחמימות"
-              consumed_g={c}
-              consumed_kcal={c * 4}
-              target_g={macroTargets?.carbs_g ?? 0}
-              target_kcal={macroTargets?.carbs_kcal ?? 0}
-              note={isRestToday ? 'יום מנוחה: יעד פחמ׳ מעט נמוך' : 'יום אימון: יעד פחמ׳ גבוה יותר'}
-            />
-            <MacroGoal
-              k="שומן"
-              consumed_g={f}
-              consumed_kcal={f * 9}
-              target_g={macroTargets?.fat_g ?? 0}
-              target_kcal={macroTargets?.fat_kcal ?? 0}
-              note={isRestToday ? 'יום מנוחה: יעד שומן מעט גבוה' : undefined}
-            />
-          </div>
-
-          <div className="mt-2 text-xs opacity-70">
+          <div className="text-xs opacity-70 px-1 leading-relaxed">
             {usingMeasurement ? (
               <>
-                היעדים מתבססים על BMR/TDEE מחושבים לפי <b>המדידה האחרונה</b>
-                {latest.measuredAt ? ` (${new Date(latest.measuredAt).toLocaleDateString('he-IL')})` : ''}:
-                משקל {weightForText ?? '—'} ק״ג
-                {typeof bfForText === 'number' ? ` ואחוז שומן ${bfForText}%` : ''}
-                {calculatedBf !== latest.bodyFatPercent && calculatedBf != null ? ' (מחושב לפי היקפים)' : ''}
-                . ביום מנוחה מקדם הפעילות יורד במעט, פחמימות יורדות ושומן עולה במעט; עם רצפת פחמימות של ~130g.
+                מחושב לפי המדידה מ־<b>{latest.measuredAt ? new Date(latest.measuredAt).toLocaleDateString('he-IL') : '—'}</b>: 
+                משקל {weightForText ?? '—'} ק״ג {typeof bfForText === 'number' ? ` ושומן ${bfForText}%` : ''}.
               </>
             ) : (
               <>
-                היעדים מתבססים על BMR/TDEE (פרופיל): משקל {weightForText ?? '—'} ק״ג
-                {typeof bfForText === 'number' ? ` ואחוז שומן ${bfForText}%` : ''}. מומלץ לעדכן מדידה כדי לדייק.
+                מחושב לפי הפרופיל: משקל {weightForText ?? '—'} ק״ג. מומלץ לעדכן מדידה לדייק.
               </>
             )}
           </div>
-        </div>
 
-        <div className="rounded-xl p-4 ring-1 ring-black/10 dark:ring-white/10">
-          <div className="text-sm opacity-70">7 הימים האחרונים</div>
-          <div className="mt-1 text-2xl font-semibold">{avg7} קק״ל בממוצע</div>
-
-          <div className="mt-3 text-sm grid gap-1">
-            {last7.map((d) => (
-              <Row key={d.dayKey} dayKey={d.dayKey} calories={d.totals.calories ?? 0} />
-            ))}
-          </div>
-
-          {maxDay && (
-            <div className="mt-3 text-xs opacity-80">
-              יום שיא: <span className="font-medium">{maxDay.dayKey}</span> — {round2(maxDay.totals.calories ?? 0)} קק״ל.
+          {/* Slider Card */}
+          <div className="bg-black/[0.03] dark:bg-white/[0.03] rounded-xl p-4 border border-black/5 dark:border-white/5">
+            <div className="flex items-center justify-between text-sm mb-4">
+              <span className="font-bold flex items-center gap-2">
+                <span className="opacity-70">🎯</span> התאמת גרעון / עודף
+              </span>
+              <span className="bg-white dark:bg-neutral-800 px-2.5 py-1 rounded-md text-xs font-mono font-bold shadow-sm border border-black/5 dark:border-white/5">
+                {pct > 0 ? `גרעון ${pct}%` : pct < 0 ? `עודף ${Math.abs(pct)}%` : 'תחזוקה 0%'}
+              </span>
             </div>
-          )}
+            
+            <input
+              type="range"
+              min={-15} max={30} step={1}
+              value={pct}
+              onChange={(e) => setPct(Number(e.target.value))}
+              className="w-full accent-indigo-600 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+              disabled={loadingPct}
+            />
+            
+            <div className="flex justify-between text-[10px] opacity-50 mt-2 font-medium uppercase tracking-wide">
+              <span>מסה (15%-)</span>
+              <span>תחזוקה</span>
+              <span>חיטוב (30%)</span>
+            </div>
+            
+            <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5">
+              <RiskBox {...risk} />
+            </div>
+          </div>
+        </div>
+      </details>
+
+      {/* 4. History (Minimal Bar Chart Style) */}
+      <div className="bg-white dark:bg-neutral-800 rounded-2xl ring-1 ring-black/5 dark:ring-white/5 shadow-sm p-5">
+        <h3 className="font-bold text-sm mb-4 flex items-center gap-2 text-gray-800 dark:text-gray-200">
+          <span className="w-6 h-6 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-xs">📊</span> 
+          ממוצע שבועי: {avg7} קק"ל
+        </h3>
+        
+        <div className="flex justify-between items-end h-32 gap-1.5 md:gap-3 pt-2">
+          {last7.slice().reverse().map((d) => {
+             const val = d.totals.calories ?? 0;
+             // Calculate height percentage. Cap at minimum 10% for visibility, max 100%.
+             const hPct = targetCalories ? Math.min(100, Math.max(10, (val / targetCalories) * 100)) : 50;
+             const isOver = targetCalories && val > targetCalories;
+             
+             return (
+               <div key={d.dayKey} className="flex flex-col items-center gap-2 w-full group relative flex-1 h-full justify-end">
+                 
+                 {/* Tooltip on hover (mostly for desktop, but good to have) */}
+                 <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-8 bg-black/80 text-white text-[10px] py-1 px-2 rounded pointer-events-none whitespace-nowrap z-10">
+                   {val} קק"ל
+                 </div>
+                 
+                 <div className="w-full max-w-[32px] bg-gray-100 dark:bg-neutral-700/50 rounded-t-lg relative flex items-end justify-center h-[calc(100%-20px)]">
+                    <div 
+                      className={`w-full rounded-t-lg transition-all duration-500 ease-out ${isOver ? 'bg-red-400 dark:bg-red-500/80' : 'bg-indigo-500 dark:bg-indigo-500/80'}`} 
+                      style={{ height: `${hPct}%` }}
+                    />
+                 </div>
+                 <span className="text-[10px] opacity-60 font-medium font-mono tracking-tighter">
+                   {/* Convert YYYY-MM-DD to DD/MM for better display */}
+                   {d.dayKey.split('-').slice(1).reverse().join('/')}
+                 </span>
+               </div>
+             );
+          })}
         </div>
       </div>
-    </SectionCard>
+    </div>
   );
 }
 
-// ... Helpers (Same as before) ...
+// ... Helpers ...
+
 function getAgeYears(profile: Profile | null): number | null {
   if (!profile) return null;
   if (typeof profile.age_years === 'number') return profile.age_years;
@@ -674,31 +601,16 @@ function getAgeYears(profile: Profile | null): number | null {
   return age;
 }
 
-function calcBMR({
-  weightKg,
-  heightCm,
-  ageYears,
-  bfPercent,
-  gender,
-}: {
-  weightKg: number | null;
-  heightCm: number | null;
-  ageYears: number | null;
-  bfPercent: number | null;
-  gender: Gender;
-}): number | null {
+function calcBMR({ weightKg, heightCm, ageYears, bfPercent, gender }: any): number | null {
   if (!weightKg || weightKg <= 0) return null;
-
   if (typeof bfPercent === 'number' && bfPercent >= 0 && bfPercent <= 60) {
     const lbm = weightKg * (1 - bfPercent / 100);
     return round2(370 + 21.6 * lbm);
   }
-
   if (heightCm && ageYears != null) {
     const s = gender === 'female' ? -161 : 5;
     return round2(10 * weightKg + 6.25 * heightCm - 5 * ageYears + s);
   }
-
   const k = gender === 'female' ? 22 : 24;
   return round2(k * weightKg);
 }
@@ -709,7 +621,7 @@ function activityMultiplier(level: ActivityLevel | null | undefined) {
     case 'light':      return { factor: 1.375, label: 'קל' };
     case 'moderate':   return { factor: 1.55,  label: 'בינוני' };
     case 'very_active':return { factor: 1.725, label: 'גבוה' };
-    default:           return { factor: 1.2,   label: 'ברירת מחדל (יושבני)' };
+    default:           return { factor: 1.2,   label: 'יושבני' };
   }
 }
 
@@ -737,114 +649,72 @@ function modeLabelForPct(pct: number) {
   return 'תחזוקה';
 }
 
-function explainDeltaPct(_pct: number, delta: number, tdee: number) {
-  const pctEff = Math.round((Math.abs(delta) / tdee) * 100);
-  if (delta === 0) return `יעד ≈ TDEE (${tdee} קק״ל).`;
-  if (delta < 0) return `גרעון אפקטיבי של ${Math.abs(delta)} קק״ל (~${pctEff}%).`;
-  return `עודף אפקטיבי של ${delta} קק״ל (~${pctEff}%).`;
-}
-
 function riskAssessment({ pct, bmr, tdee, targetCalories, hardFloor }: any) {
   const items: { level: 'ok' | 'caution' | 'danger'; text: string }[] = [];
   const deficitPerDay = tdee != null && targetCalories != null ? Math.max(0, tdee - targetCalories) : 0;
   const kgPerWeek = round2((deficitPerDay * 7) / 7700);
-  if (pct > 0) {
-    items.push({
-      level: kgPerWeek <= 0.4 ? 'ok' : kgPerWeek <= 0.7 ? 'caution' : 'danger',
-      text: `קצב ירידה משוער: ~${kgPerWeek} ק״ג/שבוע.`,
-    });
-  } else if (pct < 0) {
-    items.push({
-      level: Math.abs(pct) <= 10 ? 'ok' : 'caution',
-      text: `קצב עלייה משוער נמוך (מסה רזה) אם החלבון/אימונים מספקים.`,
-    });
-  }
-  if (targetCalories != null && targetCalories === Math.round(hardFloor)) {
-    items.push({ level: 'caution', text: 'הפעלנו רצפת בטיחות לקלוריות כדי לא לרדת נמוך מדי (בריאות/ביצועים).' });
-  }
-  if (bmr && targetCalories && targetCalories < bmr) {
-    items.push({ level: 'danger', text: `יעד נמוך מ־BMR — סיכון לעייפות, ירידה בביצועים והאטת מטבוליזם.` });
-  }
-  if (pct > 0) {
-    items.push({ level: 'ok', text: 'בגרעון מומלץ חלבון גבוה (1.8–2.3g/kg; ואם יש %שומן — לפי LBM).' });
-  } else if (pct < 0) {
-    items.push({ level: 'ok', text: 'בעודף שמור על חלבון ≥1.6g/kg כדי למקד את העלייה לשריר.' });
-  }
+  
   if (pct >= 25) {
-    items.push({ level: 'danger', text: 'גרעון גבוה מאוד: עלול לפגוע באימונים, הורמונים ומצב רוח. עדיף 15–20%.' });
-  } else if (pct >= 20) {
-    items.push({ level: 'caution', text: 'גרעון משמעותי: טוב לטווח קצר; הקפד/י על שינה, חלבון והתאוששות.' });
-  } else if (pct >= 10) {
-    items.push({ level: 'ok', text: 'גרעון מתון: בר־קיימא, מתאים לריקומפ/חיטוב ארוך.' });
+    items.push({ level: 'danger', text: 'גרעון קיצוני: סכנה לאיבוד שריר ועייפות.' });
+  } else if (pct > 0) {
+    items.push({ level: 'ok', text: `קצב משוער: ~${kgPerWeek} ק״ג לשבוע.` });
+  } else if (pct < 0) {
+    items.push({ level: 'ok', text: `עודף: מומלץ לשלב אימוני כוח לבניית שריר.` });
   }
-  if (!tdee) {
-    items.push({ level: 'caution', text: 'חסר נתון לחישוב TDEE מדויק — עדכון גיל/גובה ישפר את ההערכה.' });
+  
+  if (bmr && targetCalories && targetCalories < bmr) {
+    items.push({ level: 'danger', text: `אזהרה: היעד נמוך מ-BMR המנוחה שלך.` });
   }
+  
   const legend = { ok: '✅', caution: '⚠️', danger: '⛔' } as const;
   return { items, legend };
 }
 
-function KPI({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function KPI({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-lg p-3 ring-1 ring-black/10 dark:ring-white/10 bg-black/[.03] dark:bg-white/[.06]">
-      <div className="text-sm opacity-70">{label}</div>
-      <div className="text-lg font-semibold mt-0.5">{value}</div>
-      {hint && <div className="text-xs opacity-70 mt-0.5">{hint}</div>}
+    <div className="flex flex-col bg-gray-50 dark:bg-white/5 rounded-xl p-3 text-center border border-black/5 dark:border-white/5 shadow-sm">
+      <span className="text-[10px] opacity-60 font-bold mb-1 tracking-wider">{label}</span>
+      <span className="text-base font-bold text-indigo-900 dark:text-indigo-100">{value}</span>
     </div>
   );
 }
 
 function RiskBox({ items, legend }: ReturnType<typeof riskAssessment>) {
+  if (!items.length) return null;
   return (
-    <div className="rounded-lg p-3 ring-1 ring-black/10 dark:ring-white/10 bg-black/[.03] dark:bg-white/[.06]">
-      <div className="text-sm font-medium mb-1">השלכות הבחירה שלך:</div>
-      <ul className="space-y-1 text-sm">
-        {items.map((it, i) => (
-          <li key={i} className="flex items-start gap-2">
-            <span>{legend[it.level]}</span>
-            <span className={it.level === 'danger' ? 'text-red-600' : it.level === 'caution' ? 'text-amber-600' : ''}>
-              {it.text}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <ul className="space-y-2 text-xs">
+      {items.map((it, i) => (
+        <li key={i} className="flex items-start gap-2 leading-snug">
+          <span>{legend[it.level]}</span>
+          <span className={it.level === 'danger' ? 'text-red-600 font-bold' : it.level === 'caution' ? 'text-amber-600 font-medium' : 'opacity-80'}>
+            {it.text}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
-function bmrHint(profile: Profile | null) {
-  if (!profile?.weight_kg) return 'דרוש משקל כדי להעריך BMR.';
-  if (typeof profile?.body_fat_percent === 'number') return 'Katch–McArdle (LBM).';
-  if (profile?.height_cm && getAgeYears(profile) != null) return 'Mifflin–St Jeor.';
-  return 'קירוב לפי משקל/מין.';
-}
+// App-style Macro Card
+function MacroAppCard({ k, consumed = 0, target = 0, colorClass }: { k: string, consumed: number, target?: number, colorClass: string }) {
+  const t = target || 0;
+  const pct = t > 0 ? Math.min(100, Math.max(0, (consumed / t) * 100)) : 0;
+  const isOver = t > 0 && consumed > t;
 
-function MacroGoal({ k, consumed_g, consumed_kcal, target_g, target_kcal, note }: any) {
-  const pct = target_kcal > 0 ? Math.max(0, Math.min(100, (consumed_kcal / target_kcal) * 100)) : 0;
-  const remain_g = round2(target_g - consumed_g);
-  const remainTxt = target_g > 0 ? (remain_g >= 0 ? `נותר ~${remain_g}g` : `חריגה ~${Math.abs(remain_g)}g`) : '—';
   return (
-    <div className="rounded-lg p-3 bg-black/[.03] dark:bg-white/[.06]">
-      <div className="font-medium">{k}</div>
-      <div className="mt-1 text-sm">
-        {round2(consumed_g)}g / {round2(target_g)}g · {round2(consumed_kcal)} / {round2(target_kcal)} קק״ל
+    <div className="bg-white dark:bg-neutral-800 rounded-2xl p-3 shadow-sm border border-black/5 dark:border-white/5 flex flex-col items-center justify-center text-center relative overflow-hidden group">
+      <span className="text-[11px] opacity-60 font-bold mb-1.5">{k}</span>
+      <div className="flex items-baseline gap-1">
+        <span className={`font-black text-xl tabular-nums ${isOver ? 'text-red-500' : ''}`}>{round2(consumed)}</span>
+        <span className="text-[10px] opacity-40 font-medium">/ {t ? round2(t) : '-'}g</span>
       </div>
-      <div className="mt-2 h-2 w-full rounded-full bg-black/10 dark:bg-white/10 overflow-hidden" aria-label={`התקדמות ${k}`}>
-        <div className="h-full rounded-full bg-black/50 dark:bg-white/60 transition-[width]" style={{ width: `${pct}%` }} />
+      
+      <div className="w-full h-1.5 bg-gray-100 dark:bg-neutral-700 rounded-full mt-3 overflow-hidden">
+        <div 
+          className={`h-full rounded-full transition-all duration-1000 ease-out ${isOver ? 'bg-red-500' : colorClass}`} 
+          style={{ width: `${pct}%` }} 
+        />
       </div>
-      <div className="mt-1 text-xs opacity-70">
-        {remainTxt}
-        {note ? ` · ${note}` : ''}
-      </div>
-    </div>
-  );
-}
-
-function Row({ dayKey, calories }: { dayKey: string; calories: number }) {
-  return (
-    <div className="flex items-center justify-between">
-      <div className="opacity-70">{dayKey}</div>
-      <div className="font-medium">{round2(calories)} קק״ל</div>
     </div>
   );
 }
