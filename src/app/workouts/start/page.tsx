@@ -15,7 +15,7 @@ type Equip = {
 };
 
 type WorkoutExercise = {
-  id: number;           // workout_exercises.id (0 = מתוכנן לפני יצירת אימון)
+  id: number;            // workout_exercises.id (0 = מתוכנן לפני יצירת אימון)
   equipment_id: number; // FK to equipment
   order_index: number;
   equip: Equip;
@@ -108,6 +108,18 @@ export default function StartWorkoutPage() {
 
   // Mobile UX State: Active exercise index (using order_index instead of ID for stability)
   const [mobileActiveIndex, setMobileActiveIndex] = useState<number | null>(null);
+
+  // Body Scroll Lock for Mobile Modal
+  useEffect(() => {
+    if (mobileActiveIndex !== null) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [mobileActiveIndex]);
 
   // Rest-day flag
   const [isRestToday, setIsRestToday] = useState<boolean>(false);
@@ -543,12 +555,9 @@ export default function StartWorkoutPage() {
     }
   };
 
-  // Add a set for a specific exercise card
+  // Add a set for a specific exercise card (Optimistic UI)
   const addSet = async (weId: number) => {
-    if (!weId) {
-      await startWorkout();
-      return;
-    }
+    if (!weId) return; // Protected by button disabled state anyway
 
     const ex = exercises.find((e) => e.id === weId);
     if (!ex) return;
@@ -566,7 +575,36 @@ export default function StartWorkoutPage() {
     registerActivity(); // Activity!
 
     const nextIndex = (ex.sets[ex.sets.length - 1]?.set_index ?? 0) + 1;
+    const tempId = -Date.now(); // Temporary ID for optimistic update
 
+    const newSet: ExerciseSet = {
+      id: tempId,
+      set_index: nextIndex,
+      weight_kg: weight,
+      reps: reps,
+      distance_m: distance,
+    };
+
+    // 1. Optimistic Update Local State
+    setExercises((prev) =>
+      prev.map((e) => (e.id === weId ? { ...e, sets: [...e.sets, newSet] } : e))
+    );
+    setNewSetByEx((prev) => ({ ...prev, [weId]: { weight: '', reps: '', distance: '' } }));
+
+    // Mark previous active exercise as finished ONLY when moving to a new one
+    setFinishedWe((prev) => {
+      if (activeWeId && activeWeId !== weId) {
+        return { ...prev, [activeWeId]: true };
+      }
+      return prev;
+    });
+    setActiveWeId(weId); 
+
+    // Focus back to weight input to keep keyboard open
+    const el = weightRefMap.current[weId];
+    if (el) setTimeout(() => el.focus(), 0);
+
+    // 2. Perform DB Insertion
     const { data, error } = await supabase
       .from('exercise_sets')
       .insert({
@@ -579,44 +617,53 @@ export default function StartWorkoutPage() {
       .select('id, set_index, weight_kg, reps, distance_m')
       .single();
 
-    if (error) { setError(error.message); return; }
+    if (error) { 
+      setError(error.message); 
+      // Rollback on failure
+      setExercises((prev) =>
+        prev.map((e) => (e.id === weId ? { ...e, sets: e.sets.filter(s => s.id !== tempId) } : e))
+      );
+      return; 
+    }
 
-    // mark PREVIOUS active exercise as finished ONLY when moving to a new one
-    setFinishedWe((prev) => {
-      if (activeWeId && activeWeId !== weId) {
-        return { ...prev, [activeWeId]: true };
-      }
-      return prev;
-    });
-    setActiveWeId(weId); 
-
-    // Update local sets
+    // 3. Swap Temp ID with Real ID from Database
     setExercises((prev) =>
-      prev.map((e) => (e.id === weId ? { ...e, sets: [...e.sets, data as ExerciseSet] } : e))
+      prev.map((e) => (e.id === weId ? {
+        ...e,
+        sets: e.sets.map((s) => (s.id === tempId ? (data as ExerciseSet) : s))
+      } : e))
     );
-    // Keep form values if mobile modal, otherwise might reset - standard behavior is to reset
-    setNewSetByEx((prev) => ({ ...prev, [weId]: { weight: '', reps: '', distance: '' } }));
 
-    // focus back to weight
-    const el = weightRefMap.current[weId];
-    if (el) setTimeout(() => el.focus(), 0);
-
-    // If history is open for this equipment, refresh it
-    const exObj = exercises.find((e) => e.id === weId);
-    if (exObj && expanded[exObj.equipment_id]) loadHistory(exObj.equipment_id);
+    // If history is open for this equipment, refresh it silently
+    if (expanded[ex.equipment_id]) loadHistory(ex.equipment_id);
   };
 
+  // Remove a set (Optimistic UI)
   const removeSet = async (weId: number, setId: number) => {
     const ok = confirm('למחוק את הסט?');
     if (!ok) return;
     
     registerActivity(); // Activity!
 
-    const { error } = await supabase.from('exercise_sets').delete().eq('id', setId);
-    if (error) { setError(error.message); return; }
+    // Backup current sets for rollback
+    const currentEx = exercises.find(e => e.id === weId);
+    const previousSets = currentEx ? currentEx.sets : [];
+
+    // 1. Optimistic Remove
     setExercises((prev) =>
       prev.map((e) => (e.id === weId ? { ...e, sets: e.sets.filter((s) => s.id !== setId) } : e))
     );
+
+    // 2. DB Deletion
+    const { error } = await supabase.from('exercise_sets').delete().eq('id', setId);
+    if (error) { 
+      setError(error.message); 
+      // Rollback on failure
+      setExercises((prev) =>
+        prev.map((e) => (e.id === weId ? { ...e, sets: previousSets } : e))
+      );
+      return; 
+    }
   };
 
   // Optional customEndTime allows finishing workout at a past timestamp (for auto-finish)
@@ -1057,13 +1104,13 @@ export default function StartWorkoutPage() {
                            disabled={!!endedAt || !startedAt}
                            className="w-full py-3.5 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2"
                         >
-                           <span>{activeMobileEx.sets.length === 0 ? 'התחל תרגיל' : 'הוסף סט'}</span>
+                           <span>הוסף סט</span>
                            <span className="text-xl leading-none">+</span>
                         </button>
                         
                         {!startedAt && (
                            <p className="text-xs text-center text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 py-2 rounded-lg">
-                              ⚠️ האימון יתחיל אוטומטית עם הוספת הסט
+                              ⚠️ התחילו את האימון (למעלה) כדי להוסיף סטים
                            </p>
                         )}
                       </form>
@@ -1078,7 +1125,7 @@ export default function StartWorkoutPage() {
                          </div>
                          <div className="space-y-2">
                             {[...activeMobileEx.sets].reverse().map((s, idx) => (
-                               <div key={s.id} className="flex justify-between items-center p-3.5 bg-white dark:bg-neutral-800 rounded-xl border border-black/5 dark:border-white/5 shadow-sm">
+                               <div key={s.id} className="flex justify-between items-center p-3.5 bg-white dark:bg-neutral-800 rounded-xl border border-black/5 dark:border-white/5 shadow-sm animate-in zoom-in-95 duration-200">
                                   <div className="flex items-center gap-4">
                                      <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-sm font-bold font-mono">
                                         {s.set_index}
@@ -1272,7 +1319,7 @@ export default function StartWorkoutPage() {
                       הוסף סט
                     </button>
                     {!startedAt && (
-                      <div className="text-xs opacity-70 mt-1">יש להתחיל אימון לפני הוספת סטים</div>
+                      <div className="text-xs opacity-70 mt-1">יש להתחיל אימון למעלה לפני הוספת סטים</div>
                     )}
                   </div>
                 </form>
@@ -1294,7 +1341,7 @@ export default function StartWorkoutPage() {
                       </thead>
                       <tbody className="divide-y divide-black/10 dark:divide-white/10">
                         {ex.sets.map((s) => (
-                          <tr key={s.id}>
+                          <tr key={s.id} className="animate-in fade-in duration-300">
                             <Td>{s.set_index}</Td>
                             <Td>{fmtNum(s.weight_kg)}</Td>
                             <Td>{fmtNum(s.reps)}</Td>
@@ -1302,7 +1349,7 @@ export default function StartWorkoutPage() {
                             <Td>
                               <button
                                 onClick={() => removeSet(weId, s.id)}
-                                className="text-xs rounded-md border border-black/10 dark:border-white/20 px-2 py-1 hover:bg-black/[.04] dark:hover:bg-white/[.06]"
+                                className="text-xs rounded-md border border-black/10 dark:border-white/20 px-2 py-1 hover:bg-red-50 hover:text-red-500 hover:border-red-200 dark:hover:bg-red-900/20 transition-colors"
                               >
                                 מחק
                               </button>
