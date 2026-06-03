@@ -1,3 +1,5 @@
+// src/app/api/dietitian-ai/analyze/route.ts
+
 import { callGeminiWithFallback } from '@/lib/ai-client';
 
 export const runtime = 'nodejs';
@@ -59,6 +61,8 @@ export async function POST(req: Request) {
         - Fat Target: ${dbStatus.target_fat_g}g (Current: ${dbStatus.current_fat_g}g)
         - Planned Deficit: ${dbStatus.deficit_pct}%
         - TDEE: ${dbStatus.tdee}
+
+        *CRITICAL NOTE ON TDEE*: The user's TDEE may be adaptively calibrated based on their actual 30-day historical food intake and body weight measurements. Treat this TDEE as a highly accurate, personalized hard factual datum, NOT just a generic theoretical estimate.
         `;
     } else {
         statusDisplay = `**Estimated Targets (No real-time dashboard data):** ${JSON.stringify(targets)}`;

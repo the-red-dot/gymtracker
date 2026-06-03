@@ -1,3 +1,5 @@
+// gym-tracker-app\src\app\api\nutrition-ai\route.ts
+
 export const runtime = 'edge';
 
 /* ============================ Types ============================ */

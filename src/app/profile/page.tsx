@@ -154,6 +154,17 @@ export default function ProfilePage() {
   const [goals, setGoals] = useState<UserGoal[]>([]);
   const [goalsBusy, setGoalsBusy] = useState(false);
 
+  // ----- TDEE אדפטיבי (כיול נתונים) -----
+  const [customTdee, setCustomTdee] = useState<number | null>(null);
+  const [calibrating, setCalibrating] = useState(false);
+  const [calibrationResult, setCalibrationResult] = useState<{
+    days: number;
+    weightLost: number;
+    avgCalories: number;
+    newTdee: number;
+    loggedDays: number;
+  } | null>(null);
+
   // ----- טופס מדידה (שדות רלוונטיים בלבד) -----
   const [meas, setMeas] = useState<Omit<Measurement, 'id' | 'measured_at'>>({
     weight_kg: null,
@@ -192,7 +203,13 @@ export default function ProfilePage() {
       if (ignore) return;
 
       setUserId(uid);
-      await Promise.all([fetchProfile(uid), fetchActivity(uid), fetchGoals(uid), fetchRecent(uid)]);
+      await Promise.all([
+        fetchProfile(uid), 
+        fetchActivity(uid), 
+        fetchGoals(uid), 
+        fetchRecent(uid),
+        fetchCustomTdee(uid)
+      ]);
       setLoading(false);
     };
 
@@ -258,6 +275,18 @@ export default function ProfilePage() {
       return;
     }
     if (data?.activity_level) setActivityLevel(data.activity_level as ActivityLevel);
+  };
+
+  const fetchCustomTdee = async (uid: string) => {
+    const { data, error } = await supabase
+      .from('user_calorie_settings')
+      .select('custom_tdee')
+      .eq('user_id', uid)
+      .maybeSingle();
+    
+    if (!error && data?.custom_tdee) {
+        setCustomTdee(Number(data.custom_tdee));
+    }
   };
 
   const fetchGoals = async (uid: string) => {
@@ -331,39 +360,210 @@ export default function ProfilePage() {
     if (error) setError(error.message);
   };
 
-  // ----- מטרות -----
+  // ----- כיול TDEE חכם (מעודכן לחלון דינמי עד 90 ימים) -----
+  const handleCalibrateTDEE = async () => {
+      if (!userId) return;
+      setCalibrating(true);
+      setError(null);
+      setCalibrationResult(null);
+
+      try {
+          const daysToLookBack = 90; // מסתכל אחורה עד 3 חודשים כדי למצוא את החלון הטוב ביותר
+          const lookBackDate = new Date();
+          lookBackDate.setDate(lookBackDate.getDate() - daysToLookBack);
+          const isoStart = lookBackDate.toISOString();
+
+          // 1. קבלת מדידות משקל מ-90 הימים האחרונים
+          const { data: measData, error: measErr } = await supabase
+              .from('body_measurements')
+              .select('measured_at, weight_kg')
+              .eq('user_id', userId)
+              .not('weight_kg', 'is', null)
+              .gte('measured_at', isoStart)
+              .order('measured_at', { ascending: true }); // ישן לחדש
+
+          if (measErr) throw measErr;
+          if (!measData || measData.length < 2) {
+              throw new Error(`לא נמצאו מספיק שקילות ב-${daysToLookBack} הימים האחרונים. נדרשות לפחות 2 שקילות במרווחי זמן כדי לכייל את המערכת.`);
+          }
+
+          // 2. קבלת כל נתוני התזונה מ-90 הימים האחרונים במכה אחת
+          const { data: nutData, error: nutErr } = await supabase
+              .from('nutrition_entries')
+              .select('occurred_at, calories')
+              .eq('user_id', userId)
+              .gte('occurred_at', isoStart);
+
+          if (nutErr) throw nutErr;
+
+          // 3. אלגוריתם לאיתור חלון הזמן הרציף הארוך ביותר
+          let bestStartIdx = -1;
+          let bestEndIdx = measData.length - 1; // תמיד נשאף לסיים בשקילה הכי עדכנית
+          let maxDaysDiff = 0;
+          let finalLoggedDays = 0;
+          let finalTotalCals = 0;
+
+          const lastMeas = measData[bestEndIdx];
+
+          // רצים מהשקילה הישנה ביותר כלפי החדשה, ומחפשים את הראשונה שמקיימת את התנאים
+          for (let i = 0; i < measData.length - 1; i++) {
+              const firstMeas = measData[i];
+              const msDiff = new Date(lastMeas.measured_at).getTime() - new Date(firstMeas.measured_at).getTime();
+              const daysDiff = msDiff / (1000 * 60 * 60 * 24);
+
+              // חייב לפחות שבוע הפרש כדי שהמשקל לא יהיה מושפע מסטיות נוזלים יומיות
+              if (daysDiff >= 7) {
+                  let totalCalories = 0;
+                  const uniqueDays = new Set<string>();
+                  
+                  if (nutData) {
+                      nutData.forEach(entry => {
+                          // בודק רק ארוחות בתוך טווח הזמן הספציפי שבין השקילה ההיא לשקילה האחרונה
+                          if (entry.occurred_at >= firstMeas.measured_at && entry.occurred_at <= lastMeas.measured_at) {
+                              totalCalories += (entry.calories || 0);
+                              uniqueDays.add(entry.occurred_at.split('T')[0]);
+                          }
+                      });
+                  }
+
+                  const loggedDaysCount = uniqueDays.size;
+                  
+                  // תנאי קבלה: דיווחת תזונה לפחות ב-50% מהימים באותו חלון זמן
+                  if (loggedDaysCount >= Math.floor(daysDiff * 0.5)) {
+                      bestStartIdx = i;
+                      maxDaysDiff = daysDiff;
+                      finalLoggedDays = loggedDaysCount;
+                      finalTotalCals = totalCalories;
+                      break; // מצאנו! מאחר והתחלנו מהישן ביותר (i=0), זה בוודאות חלון הזמן הארוך ביותר האפשרי.
+                  }
+              }
+          }
+
+          if (bestStartIdx === -1) {
+              const maxPossibleGap = (new Date(lastMeas.measured_at).getTime() - new Date(measData[0].measured_at).getTime()) / 86400000;
+              if (maxPossibleGap < 7) {
+                  throw new Error(`טווח הזמן בין השקילות האחרונות שלך (${Math.round(maxPossibleGap)} ימים) קצר מדי. המערכת זקוקה למינימום 7 ימים בין שקילות כדי לנטרל השפעות נוזלים.`);
+              } else {
+                  throw new Error(`יש לך שקילות בטווח של ${Math.round(maxPossibleGap)} ימים, אך לא תיעדת מספיק ארוחות (נדרש תיעוד של לפחות 50% מהימים באותו הטווח). אנא הקפד לתעד בימים הקרובים ונסה שוב.`);
+              }
+          }
+
+          // חישוב TDEE סופי לפי החלון המיטבי שנמצא
+          const firstMeas = measData[bestStartIdx];
+          const weightDiff = firstMeas.weight_kg! - lastMeas.weight_kg!; // חיובי = ירדת במשקל
+          
+          const avgDailyCalories = finalTotalCals / finalLoggedDays;
+          
+          // נוסחה קלאסית: קילו שומן/גוף = ~7700 קלוריות
+          const dailyDeficitFromWeight = (weightDiff * 7700) / maxDaysDiff;
+          
+          // TDEE = מה שאכלתי בפועל + מה ששרפתי ממאגרי הגוף (או פחות מה שאגרתי)
+          const actualTDEE = Math.round(avgDailyCalories + dailyDeficitFromWeight);
+
+          if (actualTDEE < 1000 || actualTDEE > 5000) {
+              throw new Error(`התוצאה שהתקבלה (${actualTDEE} קק"ל) נראית חריגה. ייתכן שיש חוסר עקביות דרסטי בדיווחי התזונה או שינוי קיצוני במשקל הנוזלים.`);
+          }
+
+          setCalibrationResult({
+              days: Math.round(maxDaysDiff),
+              loggedDays: finalLoggedDays,
+              weightLost: Math.round(weightDiff * 100) / 100,
+              avgCalories: Math.round(avgDailyCalories),
+              newTdee: actualTDEE
+          });
+
+      } catch (err: any) {
+          setError(err.message);
+      } finally {
+          setCalibrating(false);
+      }
+  };
+
+  const saveCalibratedTDEE = async () => {
+      if (!userId || !calibrationResult) return;
+      setError(null);
+      
+      const { error } = await supabase.from('user_calorie_settings').upsert(
+          { user_id: userId, custom_tdee: calibrationResult.newTdee },
+          { onConflict: 'user_id' }
+      );
+
+      if (error) {
+          setError(error.message);
+      } else {
+          setCustomTdee(calibrationResult.newTdee);
+          setCalibrationResult(null); 
+          alert("ה-TDEE האישי שלך כויל ונשמר בהצלחה! המערכת כעת תשתמש בנתון זה.");
+      }
+  };
+
+  const resetCustomTdee = async () => {
+      if (!userId || !confirm('האם לבטל את הכיול האישי ולחזור לחישוב אוטומטי מבוסס BMR?')) return;
+      
+      const { error } = await supabase.from('user_calorie_settings').upsert(
+          { user_id: userId, custom_tdee: null },
+          { onConflict: 'user_id' }
+      );
+
+      if (!error) {
+          setCustomTdee(null);
+      }
+  };
+
+  // ----- מטרות (הגדרת מטרה יחידה שמעדכנת גם את היעדים התזונתיים) -----
   const isGoalChecked = (key: string) => goals.some((g) => g.goal_key === key);
 
-  const toggleKnownGoal = async (key: string, label: string) => {
+  const setMainGoal = async (key: string, label: string) => {
     if (!userId) return;
     setGoalsBusy(true);
     setError(null);
 
-    const existing = goals.find((g) => g.goal_key === key);
-    if (existing) {
-      const { error } = await supabase.from('user_goals').delete().eq('id', existing.id);
-      if (error) setError(error.message);
-      else setGoals((prev) => prev.filter((g) => g.id !== existing.id));
-    } else {
-      const { data, error } = await supabase
-        .from('user_goals')
-        .insert({ user_id: userId, goal_key: key, label })
-        .select('id, goal_key, label')
-        .single();
-      if (error) setError(error.message);
-      else if (data) setGoals((prev) => [...prev, data]);
+    // מוחק קודם כל מטרות קודמות (מאפשר רק מטרה אחת מרכזית)
+    await supabase.from('user_goals').delete().eq('user_id', userId);
+    
+    // שומר את המטרה החדשה
+    const { data, error } = await supabase
+      .from('user_goals')
+      .insert({ user_id: userId, goal_key: key, label })
+      .select('id, goal_key, label')
+      .single();
+
+    if (error) {
+      setError(error.message);
+    } else if (data) {
+      setGoals([data]);
+
+      // 2. עדכון אוטומטי של מסד הנתונים הקלורי והחלבוני בהתאם למטרה
+      let newPct = 0;
+      let newGpk = 1.6;
+      
+      if (key === 'cutting') {
+          newPct = 20; // גירעון 20%
+          newGpk = profile.body_fat_percent != null ? 2.3 : 2.0;
+      } else if (key === 'recomp') {
+          newPct = 10; // גירעון 10%
+          newGpk = 2.0;
+      } else if (key === 'bulking') {
+          newPct = -10; // עודף 10%
+          newGpk = 1.8;
+      }
+
+      // עדכון הגדרות קלוריות
+      await supabase.from('user_calorie_settings').upsert(
+          { user_id: userId, deficit_pct: newPct }, 
+          { onConflict: 'user_id' }
+      );
+
+      // עדכון הגדרות חלבון
+      await supabase.from('user_protein_settings').upsert(
+          { user_id: userId, grams_per_kg: newGpk, source_key: 'auto_goal' }, 
+          { onConflict: 'user_id' }
+      );
+
+      alert(`המטרה עודכנה בהצלחה ל-${label.split('–')[0].trim()}!\n\nיעדי התזונה שלך (קלוריות וחלבון) עברו התאמה אוטומטית בהתאם למטרה זו. תוכל לצפות בהם בטאב התזונה.`);
     }
 
     setGoalsBusy(false);
-  };
-
-  const removeGoal = async (goalId: number) => {
-    if (!userId) return;
-    setGoalsBusy(true);
-    const { error } = await supabase.from('user_goals').delete().eq('id', goalId);
-    setGoalsBusy(false);
-    if (error) setError(error.message);
-    else setGoals((prev) => prev.filter((g) => g.id !== goalId));
   };
 
   // ----- הוספת מדידה -----
@@ -548,11 +748,97 @@ export default function ProfilePage() {
         {/* ===================== TAB: ACTIVITY & GOALS ===================== */}
         {activeTab === 'activity' && (
           <div className="space-y-4">
+            
+            {/* TDEE Calibration Card - NEW FEATURE */}
+            <div className={`bg-gradient-to-br from-indigo-50 dark:from-indigo-900/10 to-white dark:to-neutral-800 rounded-3xl p-5 md:p-6 shadow-sm border ${customTdee ? 'border-emerald-400 dark:border-emerald-600 ring-1 ring-emerald-400/30' : 'border-indigo-100 dark:border-indigo-900/30'}`}>
+                <div className="flex justify-between items-start mb-4">
+                    <div className="space-y-1">
+                        <h3 className="font-bold text-lg flex items-center gap-2">
+                            <span className="text-xl">⚡</span>
+                            כיול מטבולי חכם (Adaptive TDEE)
+                        </h3>
+                        <p className="text-xs opacity-80 max-w-lg leading-relaxed">
+                            המערכת מנתחת את צריכת הקלוריות והמשקל שלך (עד 90 ימים אחורה), מאתרת את רצף הנתונים האמין ביותר, ומחשבת במדויק כמה קלוריות הגוף <b>שלך</b> שורף בפועל.
+                        </p>
+                    </div>
+                    {customTdee && (
+                        <div className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300 px-3 py-1 rounded-full text-xs font-bold border border-emerald-200 dark:border-emerald-800">
+                            ✓ מערכת מכוילת אישית
+                        </div>
+                    )}
+                </div>
+
+                {customTdee ? (
+                    <div className="flex flex-col sm:flex-row gap-4 items-center bg-white dark:bg-black/20 p-4 rounded-2xl border border-black/5 dark:border-white/5">
+                        <div className="flex-1 text-center sm:text-right">
+                            <span className="block text-xs opacity-60 font-bold mb-1">הוצאה קלורית יומית (TDEE) מחושבת</span>
+                            <span className="text-3xl font-black text-indigo-700 dark:text-indigo-400">{customTdee} <span className="text-sm font-medium">קק"ל</span></span>
+                        </div>
+                        <div className="flex gap-2 w-full sm:w-auto">
+                            <button onClick={handleCalibrateTDEE} disabled={calibrating} className="flex-1 sm:flex-none px-4 py-2 bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-900/40 dark:hover:bg-indigo-800/60 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm font-bold transition disabled:opacity-50">
+                                {calibrating ? 'מחשב...' : 'עדכן כיול מחדש'}
+                            </button>
+                            <button onClick={resetCustomTdee} className="px-4 py-2 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg text-sm font-bold transition">
+                                בטל כיול
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="mt-2">
+                        <button 
+                            onClick={handleCalibrateTDEE} 
+                            disabled={calibrating}
+                            className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-md hover:bg-indigo-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                            {calibrating ? <><span className="animate-spin">⌛</span> סורק היסטוריה ומנתח נתונים...</> : '🔍 בצע חישוב TDEE לפי הנתונים שלי'}
+                        </button>
+                    </div>
+                )}
+
+                {/* Calibration Results Panel */}
+                {calibrationResult && (
+                    <div className="mt-4 bg-white dark:bg-neutral-800 p-5 rounded-2xl border border-indigo-200 dark:border-indigo-800 shadow-lg animate-in zoom-in-95 duration-300">
+                        <h4 className="font-bold text-indigo-900 dark:text-indigo-200 mb-3 border-b border-black/5 dark:border-white/5 pb-2">תוצאות הניתוח האדפטיבי שלך</h4>
+                        
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                            <div className="bg-gray-50 dark:bg-black/20 p-2.5 rounded-lg text-center border border-black/5 dark:border-white/5" title="אורך התקופה שנמצאה כרציפה ואמינה ביותר">
+                                <span className="block text-[10px] opacity-60 font-bold">טווח מדידה</span>
+                                <span className="font-mono font-bold text-sm">{calibrationResult.days} ימים</span>
+                            </div>
+                            <div className="bg-gray-50 dark:bg-black/20 p-2.5 rounded-lg text-center border border-black/5 dark:border-white/5">
+                                <span className="block text-[10px] opacity-60 font-bold">שינוי במשקל</span>
+                                <span className="font-mono font-bold text-sm dir-ltr">{calibrationResult.weightLost > 0 ? `-${calibrationResult.weightLost}` : `+${Math.abs(calibrationResult.weightLost)}`} ק"ג</span>
+                            </div>
+                            <div className="bg-gray-50 dark:bg-black/20 p-2.5 rounded-lg text-center border border-black/5 dark:border-white/5" title="ממוצע קלוריות מהימים בהם דיווחת תזונה">
+                                <span className="block text-[10px] opacity-60 font-bold">ממוצע אכילה</span>
+                                <span className="font-mono font-bold text-sm">{calibrationResult.avgCalories} קק"ל</span>
+                            </div>
+                            <div className="bg-indigo-50 dark:bg-indigo-900/20 p-2.5 rounded-lg text-center border border-indigo-200 dark:border-indigo-800">
+                                <span className="block text-[10px] opacity-80 font-bold text-indigo-700 dark:text-indigo-300">TDEE אמיתי</span>
+                                <span className="font-mono font-black text-lg text-indigo-700 dark:text-indigo-400">{calibrationResult.newTdee}</span>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                            <button onClick={saveCalibratedTDEE} className="flex-1 py-2.5 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 transition shadow-sm">
+                                אשר ושמור כיול
+                            </button>
+                            <button onClick={() => setCalibrationResult(null)} className="px-4 py-2.5 bg-gray-200 dark:bg-white/10 text-gray-800 dark:text-white rounded-lg font-bold hover:bg-gray-300 dark:hover:bg-white/20 transition">
+                                ביטול
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+
             {/* Activity Card */}
-            <div className="bg-white dark:bg-neutral-800 rounded-3xl p-5 md:p-6 shadow-sm border border-black/5 dark:border-white/5">
-              <div className="space-y-1 mb-4">
-                 <h3 className="font-bold text-lg">רמת פעילות שבועית</h3>
-                 <p className="text-xs opacity-60">משפיע ישירות על כמות הקלוריות היומית המומלצת (TDEE).</p>
+            <div className={`bg-white dark:bg-neutral-800 rounded-3xl p-5 md:p-6 shadow-sm border border-black/5 dark:border-white/5 transition-opacity ${customTdee ? 'opacity-60 grayscale-[30%] pointer-events-none' : ''}`}>
+              <div className="space-y-1 mb-4 flex justify-between items-start">
+                 <div>
+                     <h3 className="font-bold text-lg">רמת פעילות שבועית (הערכה)</h3>
+                     <p className="text-xs opacity-60">משפיע ישירות על כמות הקלוריות היומית המומלצת בחישוב תיאורטי (TDEE).</p>
+                 </div>
+                 {customTdee && <span className="text-[10px] bg-red-100 text-red-800 px-2 py-1 rounded font-bold">מושבת (פעיל כיול אישי)</span>}
               </div>
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
@@ -593,8 +879,8 @@ export default function ProfilePage() {
               <div className="flex justify-end">
                 <button
                   onClick={saveActivityLevel}
-                  disabled={!activityLevel || savingActivity}
-                  className="w-full md:w-auto px-6 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition disabled:opacity-50"
+                  disabled={!activityLevel || savingActivity || customTdee !== null}
+                  className="w-full md:w-auto px-6 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-black rounded-xl font-bold hover:bg-opacity-90 transition disabled:opacity-50"
                 >
                   {savingActivity ? 'שומר...' : 'שמור רמת פעילות'}
                 </button>
@@ -605,7 +891,7 @@ export default function ProfilePage() {
             <div className="bg-white dark:bg-neutral-800 rounded-3xl p-5 md:p-6 shadow-sm border border-black/5 dark:border-white/5">
               <div className="space-y-1 mb-4">
                  <h3 className="font-bold text-lg">המטרות שלך</h3>
-                 <p className="text-xs opacity-60">בחר את המטרה המרכזית שלך (אפשר לבחור כמה, הדיאטנית תתחשב בזה).</p>
+                 <p className="text-xs opacity-60">בחר את המטרה המרכזית שלך (המערכת תתאים אוטומטית את היעדים הקלוריים ואת צריכת החלבון בהתאם לבחירה זו).</p>
               </div>
               
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -621,10 +907,11 @@ export default function ProfilePage() {
                       }`}
                     >
                       <input
-                        type="checkbox"
+                        type="radio"
+                        name="main_goal"
                         className="sr-only"
                         checked={checked}
-                        onChange={() => toggleKnownGoal(g.key, g.label)}
+                        onChange={() => setMainGoal(g.key, g.label)}
                         disabled={goalsBusy}
                       />
                       <span className="text-2xl">{g.icon}</span>

@@ -200,15 +200,17 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
 
       // Fallback
       const weight = weightHistory[0]?.weight_kg || userProfileData.weight_kg || 75;
-      const { data: calSettings } = await supabase.from('user_calorie_settings').select('deficit_pct').eq('user_id', userId).maybeSingle();
+      const { data: calSettings } = await supabase.from('user_calorie_settings').select('deficit_pct, custom_tdee').eq('user_id', userId).maybeSingle();
       const { data: protSettings } = await supabase.from('user_protein_settings').select('grams_per_kg').eq('user_id', userId).maybeSingle();
 
       const bmr = 24 * weight; 
-      let activityFactor = 1.2;
-      if (userProfileData.activityLevel === 'moderate') activityFactor = 1.55;
-      if (userProfileData.activityLevel === 'very_active') activityFactor = 1.725;
+      let activityFactor = 1.15; // updated conservative multiplier
+      if (userProfileData.activityLevel === 'light') activityFactor = 1.25;
+      if (userProfileData.activityLevel === 'moderate') activityFactor = 1.35;
+      if (userProfileData.activityLevel === 'very_active') activityFactor = 1.50;
       
-      const tdee = bmr * activityFactor;
+      // Use custom calibrated TDEE if available, otherwise calculate
+      const tdee = calSettings?.custom_tdee ? calSettings.custom_tdee : Math.round(bmr * activityFactor);
       
       const deficitPct = calSettings?.deficit_pct ?? 0;
       const targetCals = Math.round(tdee * (1 - deficitPct / 100));
@@ -578,7 +580,7 @@ export default function DietitianAgent({ userId, logs, userGoals, userProfileDat
             </div>
         </div>
         <div className="bg-white/20 p-2 rounded-full group-hover:bg-white/30 transition">
-             ➤
+              ➤
         </div>
       </button>
 
