@@ -484,13 +484,19 @@ export default function NutritionPage() {
   };
 
   // --- מחיקת מנה מההיסטוריה ---
-  const deleteHistoryItem = async (e: React.MouseEvent, id: number) => {
+  const deleteHistoryItem = async (e: React.MouseEvent, id: number, textToClear: string) => {
     e.stopPropagation(); // מונע מתיבת הטקסט "לתפוס" את הלחיצה
     if (!confirm('למחוק מנה זו מזיכרון ההיסטוריה?')) return;
     
     await supabase.from('user_meal_history').delete().eq('id', id);
     setMealHistory(prev => prev.filter(h => h.id !== id));
     setSuggestions(prev => prev.filter(h => h.id !== id));
+
+    // איפוס הערכים אם המנה שנמחקה היא זו שכרגע מוצגת בתיבת הטקסט
+    if (aiText.trim() === textToClear.trim()) {
+      setAiText('');
+      setAiItems(null);
+    }
   };
 
   // --- AI: save (Confirm & Save) ---
@@ -661,7 +667,13 @@ export default function NutritionPage() {
                 label="מה אכלת?"
                 placeholder='לדוגמה: "חביתה משתי ביצים, סלט קטן וכף קוטג׳"'
                 value={aiText}
-                onChange={setAiText}
+                onChange={(val) => {
+                  setAiText(val);
+                  // התרוקנה התיבה לחלוטין? מנקים את נתוני הטבלה כדי שלא יישארו תקועים
+                  if (val.trim() === '') {
+                    setAiItems(null);
+                  }
+                }}
                 className="w-full"
               />
               
@@ -693,7 +705,7 @@ export default function NutritionPage() {
                       
                       <button
                         type="button"
-                        onClick={(e) => deleteHistoryItem(e, s.id)}
+                        onClick={(e) => deleteHistoryItem(e, s.id, s.meal_text)}
                         className="px-2 py-1.5 text-indigo-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                         title="מחק מנה מהיסטוריית חיפושים"
                       >
