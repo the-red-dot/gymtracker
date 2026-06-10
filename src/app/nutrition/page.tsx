@@ -1,4 +1,4 @@
-// gym-tracker-app\src\app\nutrition\page.tsx
+// src/app/nutrition/page.tsx
 
 'use client';
 
@@ -75,10 +75,13 @@ type Profile = {
 };
 type UserGoal = { id: number; goal_key: string; label: string };
 
-// סוג חדש להיסטוריית מנות
+// סוג חדש להיסטוריית מנות - מעודכן עם ID ונתוני AI
 type MealHistoryItem = {
+  id: number;
   meal_text: string;
   usage_count: number;
+  last_used_at?: string;
+  items_data?: AiItem[]; // שומר את הערכים התזונתיים (כמו שתיקנו ידנית)
 };
 /* =========================
    END SECTION 2
@@ -130,7 +133,7 @@ export default function NutritionPage() {
 
   // --- Meal History State (Autocomplete) ---
   const [mealHistory, setMealHistory] = useState<MealHistoryItem[]>([]);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<MealHistoryItem[]>([]); // עכשיו זה מערך של אובייקטים
 
   // --- carousel tabs (4 tabs; default = 'what') ---
   const [activeTab, setActiveTab] = useState<'what' | 'protein' | 'calories' | 'bmi' | 'dietitian'>('what');
@@ -187,15 +190,25 @@ export default function NutritionPage() {
 
   /* -------- Data Fetchers Logic -------- */
   const fetchMealHistory = async (uid: string) => {
-    const { data } = await supabase
-      .from('user_meal_history')
-      .select('meal_text, usage_count')
-      .eq('user_id', uid)
-      .order('usage_count', { ascending: false })
-      .limit(200);
-    
-    if (data) {
-      setMealHistory(data as MealHistoryItem[]);
+    try {
+      const { data, error } = await supabase
+        .from('user_meal_history')
+        .select('id, meal_text, usage_count, last_used_at, items_data') // הבאנו גם את ה-ID והנתונים
+        .eq('user_id', uid)
+        .order('usage_count', { ascending: false })
+        .order('last_used_at', { ascending: false })
+        .limit(500);
+      
+      if (error) {
+        console.error('Failed to fetch meal history:', error.message);
+        return;
+      }
+      
+      if (data) {
+        setMealHistory(data as MealHistoryItem[]);
+      }
+    } catch (err) {
+      console.error('Exception fetching meal history:', err);
     }
   };
 
@@ -209,21 +222,34 @@ export default function NutritionPage() {
       if (data) setMeasurements(data);
   };
 
-  // פילטור הצעות בזמן הקלדה
+  // פילטור הצעות בזמן הקלדה (Bulletproof Filtering)
   useEffect(() => {
-    if (!aiText.trim()) {
-      setSuggestions([]);
-      return;
-    }
-    const q = aiText.toLowerCase().trim();
-    
-    // סינון פשוט: אם הטקסט שרשמתי מוכל בהיסטוריה
-    const matches = mealHistory
-      .filter(h => h.meal_text.toLowerCase().includes(q) && h.meal_text !== aiText)
-      .map(h => h.meal_text)
-      .slice(0, 5); // מקסימום 5 הצעות
+    try {
+      if (!aiText || !aiText.trim() || aiText.trim().length < 2) {
+        setSuggestions([]);
+        return;
+      }
+      const q = aiText.trim().toLowerCase();
+      
+      if (!mealHistory || mealHistory.length === 0) {
+        setSuggestions([]);
+        return;
+      }
 
-    setSuggestions(matches);
+      // סינון מוגן ומיפוי של כל האובייקט
+      const matches = mealHistory
+        .filter(h => {
+          if (!h || !h.meal_text) return false;
+          const textLower = h.meal_text.toLowerCase();
+          return textLower.includes(q) && textLower !== q;
+        })
+        .slice(0, 5); // מקסימום 5 הצעות
+
+      setSuggestions(matches);
+    } catch (err) {
+      console.error("Error filtering meal suggestions:", err);
+      setSuggestions([]);
+    }
   }, [aiText, mealHistory]);
 
   /* -------- Data fetchers -------- */
@@ -416,13 +442,14 @@ export default function NutritionPage() {
     }
   };
 
-  // --- Update Meal History (Upsert) ---
-  const updateMealHistory = async (text: string) => {
+  // --- Update Meal History (Upsert) - מעודכן לשמירת הנתונים עצמם ---
+  const updateMealHistory = async (text: string, finalItems: AiItem[]) => {
     if (!userId || !text) return;
     const cleanText = text.trim();
-    if (cleanText.length < 3) return; // Ignore very short texts
+    if (cleanText.length < 3) return; 
 
-    // נסיון לאתר האם קיים בדיוק
+    const nowIso = new Date().toISOString();
+
     const { data: existing } = await supabase
       .from('user_meal_history')
       .select('id, usage_count')
@@ -430,23 +457,40 @@ export default function NutritionPage() {
       .eq('meal_text', cleanText)
       .maybeSingle();
 
+    const payload = {
+      user_id: userId,
+      meal_text: cleanText,
+      usage_count: existing ? existing.usage_count + 1 : 1,
+      last_used_at: nowIso,
+      items_data: finalItems // <-- שומרים את הערכים התזונתיים
+    };
+
     if (existing) {
-      // עדכון: הגדלת מונה
-      await supabase
-        .from('user_meal_history')
-        .update({ usage_count: existing.usage_count + 1, last_used_at: new Date().toISOString() })
-        .eq('id', existing.id);
+      await supabase.from('user_meal_history').update(payload).eq('id', existing.id);
       
-      // עדכון סטייט מקומי
-      setMealHistory(prev => prev.map(m => m.meal_text === cleanText ? { ...m, usage_count: m.usage_count + 1 } : m).sort((a,b) => b.usage_count - a.usage_count));
+      setMealHistory(prev => {
+        const updated = prev.map(m => m.id === existing.id ? { ...m, usage_count: m.usage_count + 1, last_used_at: nowIso, items_data: finalItems } : m);
+        return updated.sort((a,b) => +new Date(b.last_used_at || 0) - +new Date(a.last_used_at || 0));
+      });
     } else {
-      // חדש: הוספה
-      await supabase
-        .from('user_meal_history')
-        .insert({ user_id: userId, meal_text: cleanText, usage_count: 1 });
-      
-      setMealHistory(prev => [...prev, { meal_text: cleanText, usage_count: 1 }].sort((a,b) => b.usage_count - a.usage_count));
+      const { data: newRow } = await supabase.from('user_meal_history').insert(payload).select('id').single();
+      if(newRow) {
+         setMealHistory(prev => {
+           const updated = [...prev, { id: newRow.id, meal_text: cleanText, usage_count: 1, last_used_at: nowIso, items_data: finalItems }];
+           return updated.sort((a,b) => +new Date(b.last_used_at || 0) - +new Date(a.last_used_at || 0));
+         });
+      }
     }
+  };
+
+  // --- מחיקת מנה מההיסטוריה ---
+  const deleteHistoryItem = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation(); // מונע מתיבת הטקסט "לתפוס" את הלחיצה
+    if (!confirm('למחוק מנה זו מזיכרון ההיסטוריה?')) return;
+    
+    await supabase.from('user_meal_history').delete().eq('id', id);
+    setMealHistory(prev => prev.filter(h => h.id !== id));
+    setSuggestions(prev => prev.filter(h => h.id !== id));
   };
 
   // --- AI: save (Confirm & Save) ---
@@ -477,9 +521,9 @@ export default function NutritionPage() {
     const inserted = (data ?? []) as NutritionEntry[];
     setEntries((prev) => dedupeById([...inserted, ...prev]));
 
-    // שמירת הטקסט להיסטוריה (רק אם היה טקסט מקורי)
+    // שמירת הטקסט להיסטוריה (יחד עם הערכים הסופיים המעודכנים)
     if (aiText && !photoFile) {
-      await updateMealHistory(aiText);
+      await updateMealHistory(aiText, aiItems);
     }
 
     const dk = dayKey(occurred_at);
@@ -611,16 +655,55 @@ export default function NutritionPage() {
         <SectionCard title="הוספה חכמה (AI)">
           <div className="space-y-4">
             
-            {/* 1. TextArea - שורה ראשונה רחבה */}
-            <TextArea
-              label="מה אכלת?"
-              placeholder='לדוגמה: "חביתה משתי ביצים, סלט קטן וכף קוטג׳"'
-              value={aiText}
-              onChange={setAiText}
-              className="w-full"
-              suggestions={suggestions}
-              onSelectSuggestion={(s) => setAiText(s)}
-            />
+            {/* 1. TextArea & Smart Suggestions */}
+            <div className="flex flex-col gap-2 relative">
+              <TextArea
+                label="מה אכלת?"
+                placeholder='לדוגמה: "חביתה משתי ביצים, סלט קטן וכף קוטג׳"'
+                value={aiText}
+                onChange={setAiText}
+                className="w-full"
+              />
+              
+              {/* כפתורי הצעות דינמיים (Chips) */}
+              {suggestions.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-1 animate-in fade-in slide-in-from-top-1">
+                  {suggestions.map((s, i) => (
+                    <div 
+                      key={s.id || i}
+                      className="inline-flex items-center bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800 rounded-full shadow-sm transition-colors overflow-hidden"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAiText(s.meal_text);
+                          // טעינה מיידית ללא צורך להמתין ל-AI אם יש לנו כבר נתונים שמורים
+                          if (s.items_data && s.items_data.length > 0) {
+                             setAiItems(s.items_data);
+                          }
+                          setSuggestions([]);
+                        }}
+                        className="px-3 py-1.5 flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300 text-sm font-medium hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors active:scale-95"
+                      >
+                        <span className="opacity-60 text-xs">🕒</span>
+                        {s.meal_text}
+                      </button>
+                      
+                      <div className="w-px h-4 bg-indigo-200 dark:bg-indigo-800"></div>
+                      
+                      <button
+                        type="button"
+                        onClick={(e) => deleteHistoryItem(e, s.id)}
+                        className="px-2 py-1.5 text-indigo-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                        title="מחק מנה מהיסטוריית חיפושים"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* 2. Actions Row: Date, Camera, Gallery */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
@@ -767,10 +850,18 @@ export default function NutritionPage() {
                           <Td>
                             <NumInput value={it.grams} onChange={(v) => updateAiItem(idx, { grams: Math.max(0, v) })} />
                           </Td>
-                          <Td>{it.calories}</Td>
-                          <Td>{it.protein_g}</Td>
-                          <Td>{it.carbs_g}</Td>
-                          <Td>{it.fat_g}</Td>
+                          <Td>
+                            <NumInput value={it.calories} onChange={(v) => updateAiItem(idx, { calories: Math.max(0, v) })} />
+                          </Td>
+                          <Td>
+                            <NumInput value={it.protein_g} onChange={(v) => updateAiItem(idx, { protein_g: Math.max(0, v) })} />
+                          </Td>
+                          <Td>
+                            <NumInput value={it.carbs_g} onChange={(v) => updateAiItem(idx, { carbs_g: Math.max(0, v) })} />
+                          </Td>
+                          <Td>
+                            <NumInput value={it.fat_g} onChange={(v) => updateAiItem(idx, { fat_g: Math.max(0, v) })} />
+                          </Td>
                           <Td>
                             <button
                               onClick={() => removeAiItem(idx)}
@@ -924,7 +1015,7 @@ export default function NutritionPage() {
                       onClick={() => setVisibleDaysCount(prev => prev + 3)}
                       className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 px-4 py-2 rounded-full transition-colors"
                     >
-                       👇 הצג ימים נוספים
+                        👇 הצג ימים נוספים
                     </button>
                  )}
 
