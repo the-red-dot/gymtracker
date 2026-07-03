@@ -347,7 +347,7 @@ export default function CalorieMetrics({
       }
     })();
     return () => { ignore = true; };
-  }, [profile?.user_id, bf, hasBf]); // הוסר התלות הישירה ב-goals כאן
+  }, [profile?.user_id, bf, hasBf]);
 
   // שמירה של ערך החלבון ב-localStorage כשהוא משתנה בממשק
   useEffect(() => {
@@ -396,81 +396,128 @@ export default function CalorieMetrics({
 
   const risk = riskAssessment({ pct, bmr, tdee, targetCalories, gender });
 
+  // הגמישות המטבולית וחישוב היעדים החכם (Flexible Dieting)
   const macroTargets = useMemo(() => {
     if (!targetCalories || !weight) return null;
+    
+    // 1. חישוב יעד חלבון בסיסי (מקודש, שומרים לו קלוריות מראש)
     const lbm = hasBf ? weight * (1 - (bf as number) / 100) : null;
     const basisKg = lbm ?? weight;
     const usedGpk = (gpk ?? getOptimalGpkForPct(pct, hasBf ? (bf as number) : null));
 
-    let protein_g = round2(basisKg * usedGpk);
-    let protein_kcal = protein_g * 4;
+    let baseProt_g = round2(basisKg * usedGpk);
+    let baseProt_kcal = baseProt_g * 4;
 
-    // מקרה קצה - אם החלבון לבדו עובר את היעד הקלורי של המשתמש (בגירעון מאוד קיצוני)
-    if (protein_kcal > targetCalories) {
-        protein_kcal = targetCalories;
-        protein_g = round2(protein_kcal / 4);
+    // הגנה מקריסת תקציב: אם החלבון לבדו עובר את היעד הקלורי היומי
+    if (baseProt_kcal > targetCalories) {
+        baseProt_kcal = targetCalories;
+        baseProt_g = baseProt_kcal / 4;
         return {
-            protein_g, protein_kcal, 
-            fat_g: 0, fat_kcal: 0, 
-            carbs_g: 0, carbs_kcal: 0, 
+            protein_g: round2(baseProt_g), protein_kcal: round2(baseProt_kcal), 
+            fat_g: round2(Math.max(f, 0)), fat_kcal: round2(Math.max(f * 9, 0)), 
+            carbs_g: round2(Math.max(c, 0)), carbs_kcal: round2(Math.max(c * 4, 0)), 
             total_kcal: targetCalories
         };
     }
 
-    let remain_kcal = targetCalories - protein_kcal;
+    // 2. חישוב יעדי בסיס לשומן ופחמימה (Base Targets)
+    let baseRemain_kcal = targetCalories - baseProt_kcal;
 
     const inDeficit = pct >= 10;
     let fatPerKg = inDeficit ? 0.8 : 1.0;
     if (isRestToday) fatPerKg = round2(fatPerKg * 1.1); 
     
-    let fat_g = weight * fatPerKg;
-    let fat_kcal = fat_g * 9;
+    let baseFat_g = weight * fatPerKg;
+    let baseFat_kcal = baseFat_g * 9;
 
-    // מקרה קצה - אין מספיק קלוריות בשביל כמות השומן האידיאלית
-    if (fat_kcal > remain_kcal) {
-        fat_kcal = remain_kcal;
-        fat_g = round2(fat_kcal / 9);
-        return {
-            protein_g, protein_kcal, 
-            fat_g, fat_kcal, 
-            carbs_g: 0, carbs_kcal: 0, 
-            total_kcal: targetCalories
-        };
+    if (baseFat_kcal > baseRemain_kcal) {
+        baseFat_kcal = baseRemain_kcal;
+        baseFat_g = baseFat_kcal / 9;
     }
 
-    remain_kcal -= fat_kcal;
-    
-    // ניסיון ראשוני לתת את השארית לפחמימות
-    let carbs_g = remain_kcal / 4;
-    let carbs_kcal = carbs_g * 4;
+    let baseCarb_kcal = baseRemain_kcal - baseFat_kcal;
+    let baseCarb_g = baseCarb_kcal / 4;
 
-    // חלוקה מחדש דינמית: במקרה שהפחמימות יורדות מתחת ל-80 גרם ואפשר לקחת קצת מהשומן (עד רצפה של 0.5 לק"ג)
-    if (carbs_g < 80 && fat_g > (weight * 0.5)) {
+    // איזון בסיסי תיאורטי
+    if (baseCarb_g < 80 && baseFat_g > (weight * 0.5)) {
       const fatFloor_g = weight * 0.5; 
       const fatFloor_kcal = fatFloor_g * 9;
       
-      const fatAvailableToSacrifice = Math.max(0, fat_kcal - fatFloor_kcal);
-      const carbsNeededKcal = (80 - carbs_g) * 4;
+      const fatAvailableToSacrifice = Math.max(0, baseFat_kcal - fatFloor_kcal);
+      const carbsNeededKcal = (80 - baseCarb_g) * 4;
       
-      const transferKcal = Math.min(Math.max(0, carbsNeededKcal), fatAvailableToSacrifice);
+      const transferKcal = Math.min(carbsNeededKcal, fatAvailableToSacrifice);
       
-      fat_kcal -= transferKcal;
-      fat_g = round2(fat_kcal / 9);
-      
-      carbs_kcal += transferKcal;
-      carbs_g = round2(carbs_kcal / 4);
+      baseFat_kcal -= transferKcal;
+      baseCarb_kcal += transferKcal;
+    }
+
+    // 3. איזון דינמי בזמן אמת ("גמישות מטבולית" / Flexible Dieting)
+    const minFat_g = weight * 0.5;
+    const minCarb_g = 50;
+
+    const currentCarb_kcal = c * 4;
+    const currentFat_kcal = f * 9;
+
+    // עתודה לקלוריות של חלבון שעוד לא נצרך
+    const proteinDeficit_kcal = Math.max(0, baseProt_g - p) * 4;
+    
+    // קלוריות שנותרו בפועל להקצות לשומן ופחמימה - המלך האמיתי של האלגוריתם
+    const effectiveRemainCals = Math.max(0, targetCalories - calsToday - proteinDeficit_kcal);
+
+    // חוק ברזל: אם אין יותר תקציב קלורי בכלל, נועלים את היעדים על מה שנאכל בפועל (כדי שיוצג 100%)
+    if (effectiveRemainCals <= 0) {
+        return {
+            protein_g: round2(baseProt_g), 
+            protein_kcal: round2(baseProt_kcal), 
+            fat_g: round2(Math.max(f, 0)), 
+            fat_kcal: round2(Math.max(f * 9, 0)), 
+            carbs_g: round2(Math.max(c, 0)), 
+            carbs_kcal: round2(Math.max(c * 4, 0)),
+            total_kcal: targetCalories,
+        };
+    }
+
+    // יש לנו קלוריות פנויות (אחרי שריון לחלבון)! נחלק אותן.
+    const pool_kcal = currentCarb_kcal + currentFat_kcal + effectiveRemainCals;
+
+    // קביעת יעדי מינימום: לא פחות ממה שאכלנו, ולא פחות מרצפת הבריאות
+    let targetFat_kcal = Math.max(currentFat_kcal, minFat_g * 9);
+    let targetCarb_kcal = Math.max(currentCarb_kcal, minCarb_g * 4);
+
+    let leftoverPool = pool_kcal - targetFat_kcal - targetCarb_kcal;
+
+    if (leftoverPool > 0) {
+      // חלוקת העודף באופן יחסי לפי הגירעון מהיעד המקורי
+      const fatDeficit = Math.max(0, baseFat_kcal - targetFat_kcal);
+      const carbDeficit = Math.max(0, baseCarb_kcal - targetCarb_kcal);
+      const totalDeficit = fatDeficit + carbDeficit;
+
+      if (totalDeficit > 0) {
+        const fatShare = fatDeficit / totalDeficit;
+        const carbShare = carbDeficit / totalDeficit;
+        targetFat_kcal += leftoverPool * fatShare;
+        targetCarb_kcal += leftoverPool * carbShare;
+      } else {
+        // אם מילאנו את שני היעדים ועדיין נשאר תקציב (למשל לא אכלנו מספיק חלבון וזה "דלף" לפחמימה)
+        targetCarb_kcal += leftoverPool;
+      }
+    } else if (leftoverPool < 0) {
+      // מקרה קיצון בו סך המינימומים דורש יותר מקלוריות התקציב. נועלים כדי למנוע יעד שלילי.
+      targetFat_kcal = Math.max(currentFat_kcal, 0);
+      targetCarb_kcal = Math.max(currentCarb_kcal, 0);
     }
 
     return {
-      protein_g: round2(protein_g), 
-      protein_kcal: round2(protein_kcal), 
-      fat_g: round2(fat_g), 
-      fat_kcal: round2(fat_kcal), 
-      carbs_g: round2(carbs_g), 
-      carbs_kcal: round2(carbs_kcal),
+      protein_g: round2(baseProt_g), 
+      protein_kcal: round2(baseProt_kcal), 
+      fat_g: round2(targetFat_kcal / 9), 
+      fat_kcal: round2(targetFat_kcal), 
+      carbs_g: round2(targetCarb_kcal / 4), 
+      carbs_kcal: round2(targetCarb_kcal),
       total_kcal: targetCalories,
     };
-  }, [targetCalories, weight, bf, pct, isRestToday, gpk, hasBf]);
+  }, [targetCalories, weight, bf, pct, isRestToday, gpk, hasBf, c, f, p, calsToday]);
 
   /* ----- SNAPSHOT SAVE TO DB ----- */
   useEffect(() => {

@@ -48,7 +48,7 @@ type Measurement = {
 };
 // ===== SECTION 2 END =====
 
-// ===== SECTION 3 TITLE: Constants =====
+// ===== SECTION 3 TITLE: Constants & Helpers =====
 const KNOWN_GOALS: { key: string; label: string; icon: string }[] = [
   { key: 'bulking', label: 'BULKING – עלייה במסת שריר', icon: '💪' },
   { key: 'cutting', label: 'CUTTING – חיטוב וירידה בשומן', icon: '🔥' },
@@ -102,7 +102,7 @@ const MEAS_HELP: Record<
   },
   body_fat_percent: {
     title: 'אחוז שומן',
-    text: 'אם אין – השאירו ריק. ההיקפים יעזרו להבין מגמות. אפשר לעדכן בעתיד ממאזן/קליפרים.',
+    text: 'המערכת יודעת לחשב זאת אוטומטית לפי היקפים (גובה, צוואר, מותן ולנשים גם אגן) אם תשאירו ריק.',
   },
 };
 
@@ -120,6 +120,8 @@ const MEAS_IMG: Record<string, string> = {
   weight_kg:        'https://i.imgur.com/XxMPXTh.jpeg',
   body_fat_percent: 'https://i.imgur.com/pAxCrLf.jpeg',
 };
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
 // ===== SECTION 3 END =====
 
 
@@ -184,6 +186,9 @@ export default function ProfilePage() {
 
   const [recent, setRecent] = useState<Measurement[]>([]);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  
+  // Track auto-calculated BF to avoid overwriting manual user inputs
+  const [autoBfValue, setAutoBfValue] = useState<number | null>(null);
 
   const fmtDate = useMemo(() => new Intl.DateTimeFormat('he-IL', { dateStyle: 'medium' }), []);
   const fmtTime = useMemo(() => new Intl.DateTimeFormat('he-IL', { timeStyle: 'short' }), []);
@@ -235,6 +240,56 @@ export default function ProfilePage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [activeTab]);
+
+  // ----- חישוב אוטומטי של אחוז שומן (Navy Method) לפי המדידות שמוזנות כעת -----
+  useEffect(() => {
+    // לא נחשב אם לא הגדירו מין במפורש
+    if (profile.gender !== 'male' && profile.gender !== 'female') {
+      return; 
+    }
+
+    const h = toNumOrNull(profile.height_cm);
+    const neck = toNumOrNull(meas.neck_cm);
+    const hips = toNumOrNull(meas.hips_cm);
+    
+    // בוחרים את נתון המותן הזמין בהתאם למין (העדפה צרה לאישה, טבור לגבר)
+    let waist: number | null = null;
+    if (profile.gender === 'female') {
+      waist = toNumOrNull(meas.waist_narrow_cm) || toNumOrNull(meas.waist_navel_cm);
+    } else {
+      waist = toNumOrNull(meas.waist_navel_cm) || toNumOrNull(meas.waist_narrow_cm) || toNumOrNull(meas.waist_cm);
+    }
+
+    if (h && neck && waist) {
+      if (profile.gender === 'female' && !hips) return; // נשים חייבות נתון אגן
+      
+      const hIn = h / 2.54;
+      const neckIn = neck / 2.54;
+      const waistIn = waist / 2.54;
+      let val = 0;
+
+      if (profile.gender === 'female') {
+        const hipsIn = (hips || 0) / 2.54;
+        val = 163.205 * Math.log10(waistIn + hipsIn - neckIn) - 97.684 * Math.log10(hIn) - 78.387;
+      } else {
+        const diff = waistIn - neckIn;
+        if (diff > 0) {
+          val = 86.010 * Math.log10(diff) - 70.041 * Math.log10(hIn) + 36.76;
+        }
+      }
+
+      if (val > 0) {
+        const newBf = Math.max(2, Math.min(60, round1(val)));
+        if (newBf !== autoBfValue) {
+          setAutoBfValue(newBf);
+          // נעדכן את שדה אחוז השומן רק אם הוא ריק כרגע, או אם הוא שווה לערך האוטומטי הקודם (כלומר המשתמש לא דרס אותו ידנית)
+          if (meas.body_fat_percent === null || meas.body_fat_percent === autoBfValue) {
+            setMeas(m => ({ ...m, body_fat_percent: newBf }));
+          }
+        }
+      }
+    }
+  }, [profile.height_cm, profile.gender, meas.neck_cm, meas.waist_navel_cm, meas.waist_narrow_cm, meas.waist_cm, meas.hips_cm, meas.body_fat_percent, autoBfValue]);
 
   const fetchProfile = async (uid: string) => {
     const { data, error } = await supabase
@@ -570,13 +625,43 @@ export default function ProfilePage() {
   const addMeasurement = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userId) return;
+
+    // --- Validation: Check if BF is missing, and if we can calculate it ---
+    const bfVal = toNumOrNull(meas.body_fat_percent);
+    
+    if (bfVal === null) {
+      const missing = [];
+      
+      if (profile.gender !== 'male' && profile.gender !== 'female') {
+        missing.push('• בחירת מין ביולוגי זכר/נקבה (יש להגדיר בלשונית "פרופיל" לצורך הנוסחה)');
+      }
+      if (!profile.height_cm) missing.push('• גובה (בלשונית פרופיל)');
+      if (!meas.neck_cm) missing.push('• היקף צוואר');
+      
+      if (profile.gender === 'female') {
+        if (!meas.waist_narrow_cm && !meas.waist_navel_cm) missing.push('• היקף מותן');
+        if (!meas.hips_cm) missing.push('• היקף ירכיים (אגן)');
+      } else {
+        if (!meas.waist_navel_cm && !meas.waist_narrow_cm && !meas.waist_cm) missing.push('• היקף מותן (גובה הטבור)');
+      }
+
+      if (missing.length > 0) {
+        const proceed = window.confirm(
+          `לא הזנת אחוז שומן במפורש.\n\nהמערכת יכולה לחשב עבורך את אחוז השומן אוטומטית לפי שיטת הצי האמריקאי (Navy Method), אם תשלים/י את הנתונים החסרים:\n${missing.join('\n')}\n\nהאם לשמור את המדידה בכל זאת (ללא אחוז שומן)?`
+        );
+        if (!proceed) {
+          return;
+        }
+      }
+    }
+
     setAddingMeas(true);
     setError(null);
 
     const payload = {
       user_id: userId,
       weight_kg: toNumOrNull(meas.weight_kg),
-      body_fat_percent: toNumOrNull(meas.body_fat_percent),
+      body_fat_percent: bfVal, // הערך המעודכן, בין אם מהסטייט האוטומטי ובין אם מהקופצת
 
       chest_cm: toNumOrNull(meas.chest_cm),
       hips_cm: toNumOrNull(meas.hips_cm),
@@ -604,6 +689,7 @@ export default function ProfilePage() {
       biceps_cm: null, thigh_cm: null, calf_cm: null, neck_cm: null, waist_navel_cm: null,
       waist_narrow_cm: null, shoulders_cm: null, notes: null,
     });
+    setAutoBfValue(null);
     if (userId) await fetchRecent(userId);
   };
 
