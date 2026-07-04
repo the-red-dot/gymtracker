@@ -13,6 +13,7 @@ import ProteinGoals from './ProteinGoals';
 import CalorieMetrics, { type DayAgg } from './CalorieMetrics';
 import BMIWidget from './bmi';
 import DietitianAgent from './DietitianAgent'; 
+import BodyComposition from './BodyComposition';
 
 import {
   PAGE_SIZE,
@@ -25,7 +26,7 @@ import {
   fmtNum,
   dayKey,
 } from './utils';
-import { SectionCard, Th, Td, DateTimeField, TextArea, NumInput } from './ui';
+import { SectionCard, Th, Td, TextArea, NumInput } from './ui';
 /* =========================
    END SECTION 1
    ========================= */
@@ -135,8 +136,8 @@ export default function NutritionPage() {
   const [mealHistory, setMealHistory] = useState<MealHistoryItem[]>([]);
   const [suggestions, setSuggestions] = useState<MealHistoryItem[]>([]); // עכשיו זה מערך של אובייקטים
 
-  // --- carousel tabs (4 tabs; default = 'what') ---
-  const [activeTab, setActiveTab] = useState<'what' | 'protein' | 'calories' | 'bmi' | 'dietitian'>('what');
+  // --- carousel tabs (5 tabs; default = 'what') ---
+  const [activeTab, setActiveTab] = useState<'what' | 'protein' | 'calories' | 'bodycomp' | 'bmi' | 'dietitian'>('what');
 
   const fmtDate = useMemo(() => new Intl.DateTimeFormat('he-IL', { dateStyle: 'full' }), []);
   const fmtTime = useMemo(() => new Intl.DateTimeFormat('he-IL', { timeStyle: 'short' }), []);
@@ -215,7 +216,7 @@ export default function NutritionPage() {
   const fetchMeasurements = async (uid: string) => {
       const { data } = await supabase
         .from('body_measurements')
-        .select('measured_at, weight_kg, body_fat_percent')
+        .select('*') // משנים ל-* כדי לקבל את כל ההיקפים עבור BodyComposition
         .eq('user_id', uid)
         .order('measured_at', { ascending: false })
         .limit(20);
@@ -346,7 +347,7 @@ export default function NutritionPage() {
 
   // Arrow keys — cycle tabs
   useEffect(() => {
-    const order: Array<'what' | 'protein' | 'calories' | 'bmi' | 'dietitian'> = ['what', 'protein', 'calories', 'bmi', 'dietitian'];
+    const order: Array<'what' | 'protein' | 'calories' | 'bodycomp' | 'bmi' | 'dietitian'> = ['what', 'protein', 'calories', 'bodycomp', 'bmi', 'dietitian'];
     const onKey = (e: KeyboardEvent) => {
       const idx = order.indexOf(activeTab);
       if (e.key === 'ArrowRight') setActiveTab(order[(idx + 1) % order.length]);
@@ -555,6 +556,7 @@ export default function NutritionPage() {
     { id: 'what', label: 'מה אכלתי', icon: '🍽️' },
     { id: 'protein', label: 'מדדי חלבון', icon: '🥩' },
     { id: 'calories', label: 'מדדים קלוריים', icon: '🔥' },
+    { id: 'bodycomp', label: 'הרכב גוף', icon: '🧬' },
     { id: 'bmi', label: 'BMI ומשקל', icon: '⚖️' },
     { id: 'dietitian', label: 'דיאטנית AI', icon: '👩‍⚕️' },
   ] as const;
@@ -641,6 +643,8 @@ export default function NutritionPage() {
             todayTotals={todayTotals}
             last7={last7}
           />
+        ) : activeTab === 'bodycomp' ? (
+          <BodyComposition profile={profile} measurements={measurements} />
         ) : activeTab === 'bmi' ? (
           <BMIWidget userId={userId} profile={profile} />
         ) : activeTab === 'dietitian' ? (
