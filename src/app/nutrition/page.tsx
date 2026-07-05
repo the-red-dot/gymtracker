@@ -644,7 +644,7 @@ export default function NutritionPage() {
             last7={last7}
           />
         ) : activeTab === 'bodycomp' ? (
-          <BodyComposition profile={profile} measurements={measurements} />
+          <BodyComposition profile={profile} measurements={measurements} goals={goals} />
         ) : activeTab === 'bmi' ? (
           <BMIWidget userId={userId} profile={profile} />
         ) : activeTab === 'dietitian' ? (

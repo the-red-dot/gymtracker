@@ -11,7 +11,6 @@ const format1Dec = (n: number | null | undefined) => (n == null || isNaN(n)) ? '
 const format2Dec = (n: number | null | undefined) => (n == null || isNaN(n)) ? '--' : Number(n).toFixed(2);
 const formatDateShort = (d: Date) => `${d.getDate()}.${d.getMonth() + 1}`;
 
-// כרטיסייה חכמה עם הסבר נפתח/נסגר (אקורדיון)
 function SectionCard({ title, subtitle, explanation, children }: { title: string, subtitle?: string, explanation?: React.ReactNode, children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -32,7 +31,6 @@ function SectionCard({ title, subtitle, explanation, children }: { title: string
         </div>
         {subtitle && <p className="text-sm text-gray-500 leading-relaxed">{subtitle}</p>}
         
-        {/* Expanded Explanation Area */}
         <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${isOpen ? 'grid-rows-[1fr] mt-3' : 'grid-rows-[0fr]'}`}>
             <div className="overflow-hidden">
                 <div className="p-4 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-900/20 rounded-xl text-sm text-indigo-900 dark:text-indigo-200 leading-relaxed">
@@ -53,6 +51,12 @@ export interface Profile {
   gender: Gender | null;
   height_cm: number | null;
   birth_date?: string | null;
+}
+
+export interface UserGoal {
+  id: number;
+  goal_key: string;
+  label: string;
 }
 
 export interface BodyMeas {
@@ -156,9 +160,11 @@ function getAge(birthDateStr?: string | null): number {
 export default function BodyComposition({
   profile,
   measurements,
+  goals = [], // מקבל את המטרות שהוגדרו באתר
 }: {
   profile: Profile | null;
   measurements: BodyMeas[];
+  goals?: UserGoal[];
 }) {
 
   const sortedRawMeasurements = useMemo(() => {
@@ -182,22 +188,30 @@ export default function BodyComposition({
     const h = toNum(profile?.height_cm);
     const hm = h ? h / 100 : null;
 
+    // Carry-forward logic: נזכור את ההיקפים והשומן האחרונים שהוזנו, כדי שאם
+    // תהיה מדידת משקל בלי היקפים באותו רגע, נשתמש בהיקפים מהיום/השבוע האחרון.
+    let runningWaist: number | null = null;
+    let runningHips: number | null = null;
+    let runningNeck: number | null = null;
+    let runningBf: number | null = null;
+
     const enriched = sortedRawMeasurements.map((m) => {
+      // עדכון ערכים נוכחיים (אם קיימים בשורה זו, נשמור אותם להמשך)
+      const currentWaist = toNum(m.waist_navel_cm) ?? toNum(m.waist_cm) ?? toNum(m.waist_narrow_cm);
+      if (currentWaist !== null) runningWaist = currentWaist;
+      if (toNum(m.hips_cm) !== null) runningHips = toNum(m.hips_cm);
+      if (toNum(m.neck_cm) !== null) runningNeck = toNum(m.neck_cm);
+      if (toNum(m.body_fat_percent) !== null) runningBf = toNum(m.body_fat_percent);
+
       const rawW = toNum(m.weight_kg);
-      if (!rawW) return null; 
+      if (!rawW) return null; // ממשיכים הלאה, אבל זכרנו את ההיקפים לשימוש בשקילה הבאה
       
       const emaW = emaWeights[weightIdx++];
       
-      const waist = toNum(m.waist_navel_cm) ?? toNum(m.waist_cm) ?? toNum(m.waist_narrow_cm);
-      const neck = toNum(m.neck_cm);
-      const hips = toNum(m.hips_cm);
-      const chest = toNum(m.chest_cm);
-      const shoulders = toNum(m.shoulders_cm);
-
-      let bf = toNum(m.body_fat_percent);
-      if (bf == null && h && waist) {
-        const navy = neck ? calcNavy({ gender: profile?.gender ?? null, height_cm: h, neck_cm: neck, waist_cm: waist, hips_cm: hips }) : null;
-        const rfm = calcRFM(profile?.gender ?? null, h, waist);
+      let bf = runningBf;
+      if (bf == null && h && runningWaist) {
+        const navy = runningNeck ? calcNavy({ gender: profile?.gender ?? null, height_cm: h, neck_cm: runningNeck, waist_cm: runningWaist, hips_cm: runningHips }) : null;
+        const rfm = calcRFM(profile?.gender ?? null, h, runningWaist);
         if (navy && rfm) bf = (navy + rfm) / 2;
         else bf = navy || rfm;
       }
@@ -212,8 +226,8 @@ export default function BodyComposition({
         }
       }
 
-      if (waist && hips && h) {
-        smm = calcSMM(profile?.gender ?? null, emaW, waist, hips, h, age);
+      if (runningWaist && runningHips && h) {
+        smm = calcSMM(profile?.gender ?? null, emaW, runningWaist, runningHips, h, age);
       }
 
       return {
@@ -306,9 +320,6 @@ export default function BodyComposition({
     { key: 'hips_cm', label: 'ירכיים/אגן' },
   ];
 
-  let totalMuscleDiff = 0;
-  let validMuscleCount = 0;
-
   const renderMuscleItem = (item: any) => {
     const { curr, prev } = getHistoricalValues(item.key as keyof BodyMeas);
     
@@ -339,8 +350,6 @@ export default function BodyComposition({
     }
     
     const diff = curr.val - prev.val;
-    totalMuscleDiff += diff;
-    validMuscleCount++;
     const isGood = diff >= 0; 
     
     return (
@@ -416,28 +425,6 @@ export default function BodyComposition({
   const muscleElements = muscleMeasurements.map(renderMuscleItem);
   const fatElements = fatMeasurements.map(renderFatItem);
 
-  let correlationMessage = null;
-  if (validMuscleCount > 0 && processedData.length >= 2) {
-    const currentPD = processedData[processedData.length - 1];
-    const prevPD = processedData[processedData.length - 2];
-    
-    if (currentPD.lbm != null && prevPD.lbm != null) {
-      const deltaLean = round2(currentPD.lbm - prevPD.lbm);
-      const muscleTrendPositive = totalMuscleDiff >= 0;
-      const lbmPositive = deltaLean >= 0;
-
-      if (lbmPositive && muscleTrendPositive) {
-        correlationMessage = "✅ המגמה תואמת: העלייה ב-LBM מגובה בעלייה בפועל בהיקפי השרירים.";
-      } else if (!lbmPositive && !muscleTrendPositive) {
-        correlationMessage = "⚠️ המגמה תואמת: איבוד מסת השריר משתקף גם בירידה בהיקפי השרירים.";
-      } else if (lbmPositive && !muscleTrendPositive) {
-        correlationMessage = "ℹ️ ה-LBM מראה עלייה, אך היקפי השרירים ירדו. ייתכן שחלק מהעלייה נובעת מנוזלים.";
-      } else {
-        correlationMessage = "ℹ️ ה-LBM מראה ירידה, אך שמרת על היקפי השרירים! ייתכן שאיבדת רק נוזלים ולא שריר.";
-      }
-    }
-  }
-
   // --- Ratios Calculation ---
   const waistVal = getHistoricalValues('waist_navel_cm').curr?.val ?? getHistoricalValues('waist_cm').curr?.val ?? getHistoricalValues('waist_narrow_cm').curr?.val;
   const prevWaistVal = getHistoricalValues('waist_navel_cm').prev?.val ?? getHistoricalValues('waist_cm').prev?.val ?? getHistoricalValues('waist_narrow_cm').prev?.val;
@@ -484,6 +471,10 @@ export default function BodyComposition({
   const current = hasEnoughWeightData ? processedData[processedData.length - 1] : null;
   const previous = hasEnoughWeightData ? processedData[processedData.length - 2] : null;
 
+  // שאיבת המטרה של המשתמש (או דיפולט לריקומפ)
+  const mainGoalKey = goals?.[0]?.goal_key || 'recomp';
+  const mainGoalLabel = goals?.[0]?.label || 'ברירת מחדל (ריקומפוזיציה)';
+
   return (
     <div className="animate-in fade-in duration-300 space-y-6">
       
@@ -509,42 +500,10 @@ export default function BodyComposition({
             </div>
             
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <StatBox 
-                 label="מסת גוף רזה (LBM)" 
-                 current={current?.lbm} prev={previous?.lbm} unit="kg" reverseColors={false} 
-                 actionPlan={{
-                     why: "מייצג את המשקל נטול השומן (שריר, עצמות, נוזלים). עלייה במדד זה מעידה לרוב על בניית שריר והאצת חילוף החומרים.",
-                     diet: "כדי לבנות שריר יש להקפיד על עודף קלורי קל (במסה) או תחזוקה, יחד עם צריכת חלבון גבוהה (1.6-2.2 גרם לקילו).",
-                     training: "אימוני התנגדות וכוח (משקולות/מכשירים) עם עקרון העומס המוסף (Progressive Overload) הם הדרך היחידה להגדיל נתון זה."
-                 }}
-              />
-              <StatBox 
-                 label="מסת שומן (FM)" 
-                 current={current?.fm} prev={previous?.fm} unit="kg" reverseColors={true} 
-                 actionPlan={{
-                     why: "המשקל האבסולוטי של השומן שלך. ירידה כאן אומרת שבאמת שרפת רקמת שומן, בלי קשר לתנודות משקל נוזלים או שריר.",
-                     diet: "המפתח הוא גירעון קלורי עקבי. אכול פחות קלוריות ממה שהגוף שורף (TDEE).",
-                     training: "אימונים שורפים מעט קלוריות ישירות, אך אימוני כוח יבטיחו שהירידה במשקל תגיע מהשומן ולא מפירוק מסת שריר."
-                 }}
-              />
-              <StatBox 
-                 label="אחוז שומן" 
-                 current={current?.bf} prev={previous?.bf} unit="%" reverseColors={true} 
-                 actionPlan={{
-                     why: "היחס בין השומן למשקל הכללי. משפיע על המראה המחוטב. חשוב להבין: ניתן להוריד אחוז שומן גם על ידי בניית שריר, ללא ירידה בגרם שומן!",
-                     diet: "גירעון קלורי להורדת השומן, או לחלופין מאזן נטרלי עם חלבון גבוה לטובת 'רקומפוזיציה' (המרה איטית של יחס שומן/שריר).",
-                     training: "שילוב של היפרטרופיה (להגדלת מסת השריר הכוללת) יחד עם אירובי יעזור להוריד את האחוז הכללי."
-                 }}
-              />
-              <StatBox 
-                 label="משקל כולל" 
-                 current={current?.emaWeight} prev={previous?.emaWeight} unit="kg" reverseColors={true} 
-                 actionPlan={{
-                     why: "מספר אבסולוטי המורכב משומן, שריר, מים, ומזון. אל תיתן לו לנהל אותך רגשית - הוא בעיקר כלי עזר לחישוב קלוריות מתמטי.",
-                     diet: "עלייה או ירידה במשקל הכללי נקבעות אך ורק ממאזן הקלוריות (Calories In vs. Calories Out).",
-                     training: "האימונים שלך הם אלו שיקבעו איך המשקל הזה ייראה במראה (האם תראה מוצק וחזק או רך)."
-                 }}
-              />
+              <StatBox label="מסת גוף רזה (LBM)" current={current?.lbm} prev={previous?.lbm} unit="kg" reverseColors={false} />
+              <StatBox label="מסת שומן (FM)" current={current?.fm} prev={previous?.fm} unit="kg" reverseColors={true} />
+              <StatBox label="אחוז שומן" current={current?.bf} prev={previous?.bf} unit="%" reverseColors={true} />
+              <StatBox label="משקל כולל" current={current?.emaWeight} prev={previous?.emaWeight} unit="kg" reverseColors={true} />
             </div>
             
             {current?.bf != null && <BfGauge bf={current.bf} gender={profile?.gender ?? 'male'} />}
@@ -556,8 +515,7 @@ export default function BodyComposition({
       {hasEnoughWeightData && (
         <SectionCard 
           title="משקל מגמה מוחלק (Time-Aware EMA Filter)" 
-          subtitle="הקו הכחול מייצג את המשקל הפיזיולוגי האמיתי שלך, מנוקה מרעשים ותנודות יומיות."
-          explanation="האלגוריתם מסנן קפיצות פתאומיות (כגון אגירת נוזלים לאחר ארוחה מלוחה או פחמימות). הוא לוקח בחשבון את הזמן שעבר בין המדידות כדי להתאים את המגמה (Trend), מה שמונע ממך לקבל החלטות פזיזות בגלל שקילה נקודתית."
+          subtitle="הקו הכחול מייצג את המשקל הפיזיולוגי האמיתי שלך, מסונן מתנודות יומיות על בסיס ציר הזמן."
         >
           <div className="bg-gray-50 dark:bg-[#1a1a1a] p-4 rounded-xl border border-gray-200 dark:border-white/5">
               <div className="flex items-center justify-center sm:justify-end flex-wrap gap-4 mb-4 text-xs font-medium">
@@ -568,77 +526,128 @@ export default function BodyComposition({
               <EmaChart data={processedData} />
               
               <div className="mt-2 flex flex-col sm:flex-row justify-between items-center px-2 pt-4 border-t border-black/5 dark:border-white/5 gap-2">
-                  <div className="text-xs opacity-60 text-center sm:text-right">מסנן דינמי: מחושב את פער הימים בין המדידות</div>
+                  <div className="text-xs opacity-60 text-center sm:text-right">מציג את נקודת הפתיחה ומקסימום 4 המדידות האחרונות (למניעת עומס)</div>
                   <div className="text-sm">משקל מגמה נוכחי: <strong className="text-indigo-600 dark:text-indigo-400 text-lg tabular-nums" dir="ltr">{format1Dec(current?.emaWeight)}kg</strong></div>
               </div>
           </div>
         </SectionCard>
       )}
 
-      <div className="grid md:grid-cols-2 gap-6">
+      <div className="grid lg:grid-cols-2 gap-6">
         
         {/* 3. COMPARTMENT ANALYSIS (FFMI & SMM) */}
         {hasEnoughWeightData && (
           <SectionCard 
             title="מסת שריר שלד (SMM & FFMI)"
             subtitle="ה-'GPS' שלך לדעת אם אתה באמת בונה שריר. המדדים מנכים את השומן מהמשקל ובוחנים רק את המסה הפעילה."
-            explanation={
-                <div className="space-y-3">
-                  <p><strong>FFMI (Fat-Free Mass Index):</strong> מדד המנכה את השומן ובוחן את מסת השריר ביחס לגובה. בדומה ל-BMI, רק שהוא מתמקד בשריר. מחושב מתוך הגובה שלך ({profile?.height_cm || '?'} ס"מ), משקל המגמה ({format1Dec(current?.emaWeight)} ק"ג) ואחוז השומן המוערך ({format1Dec(current?.bf || 0)}%).</p>
-                  <p><strong>שריר שלד נטו (SMM - Al-Gindan):</strong> הערכה מתמטית למסת שריר השלד האקטיבית (בקילוגרמים). מחושבת על בסיס היחס שבין המשקל הכולל להיקף המותן והאגן. ירידה במותן בזמן שמשקל המגמה יציב - תעלה נתון זה.</p>
-                </div>
-            }
           >
             {current?.ffmi ? (
-              <div className="space-y-5">
-                <div className="flex items-center justify-between">
-                  <div className="text-right">
-                      <span className={`text-xs px-3 py-1 rounded-full font-bold
-                        ${current.ffmi >= 22 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300' : 
-                          current.ffmi >= 20 ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' : 
-                          'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'}`}>
-                          {getFfmiCategory(current.ffmi, profile?.gender ?? null)}
-                      </span>
-                  </div>
-                  <div className="flex flex-col items-end">
-                    <div className="text-4xl font-black text-indigo-700 dark:text-indigo-400 tabular-nums leading-none tracking-tight" dir="ltr">{format1Dec(current.ffmi)}</div>
-                    <div className="text-[11px] font-bold opacity-50 uppercase tracking-wider mt-1">Normalized FFMI</div>
-                  </div>
-                </div>
+              <div className="space-y-6">
                 
-                <div className="space-y-2 pt-2" dir="ltr">
-                  <div className="h-4 w-full bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden relative shadow-inner">
-                    <div 
-                        className="absolute top-0 left-0 h-full bg-gradient-to-r from-blue-400 to-indigo-600 transition-all duration-1000"
-                        style={{ width: `${Math.min(100, Math.max(0, ((current.ffmi - 15) / (25 - 15)) * 100))}%` }}
-                    />
-                  </div>
-                  <div className="flex justify-between text-[10px] font-bold opacity-50 px-1">
-                      <span>15 (Avg)</span>
-                      <span>20 (Athletic)</span>
-                      <span>25 (Limit)</span>
-                  </div>
+                {/* 1. FFMI Section with Custom Graph */}
+                <div className="bg-gray-50 dark:bg-black/20 p-5 rounded-2xl border border-black/5 dark:border-white/5 relative shadow-sm flex flex-col h-full">
+                    <div className="flex justify-between items-start mb-4">
+                        <div className="flex flex-col">
+                            <h3 className="font-bold text-lg">Normalized FFMI</h3>
+                            <span className="text-xs opacity-60">מדד מסת שריר מנורמלת לגובה</span>
+                        </div>
+                        <div className="text-4xl font-black text-indigo-700 dark:text-indigo-400 tabular-nums leading-none tracking-tight" dir="ltr">
+                            {format1Dec(current.ffmi)}
+                        </div>
+                    </div>
+                    
+                    {/* Scale Feedback */}
+                    <FfmiGauge ffmi={current.ffmi} gender={profile?.gender ?? 'male'} />
+
+                    <Accordion title="מה זה בכלל אומר?">
+                        <div className="text-xs space-y-2 opacity-90">
+                            <p>
+                                בעוד ש-BMI רגיל בודק רק משקל מול גובה (ולכן מפתח גוף יכול להיחשב בו "שמן"), <strong>FFMI</strong> מודד כמה מסת שריר יש לך ביחס לגובה שלך, תוך נטרול אחוז השומן. הגרסה המנורמלת (Normalized) עושה התאמה מתמטית כדי שלאנשים גבוהים או נמוכים מאוד לא יהיה עיוות בתוצאה.
+                            </p>
+                            <p>עבור גברים מתאמנים, הסקאלה הכללית נראית בערך כך:</p>
+                            <ul className="list-disc pr-4 space-y-1">
+                                <li><strong>מתחת ל-18:</strong> מסת שריר נמוכה מהממוצע או נקודת התחלה של מתאמן מתחיל.</li>
+                                <li><strong>18–20:</strong> ממוצע.</li>
+                                <li><strong>20–22:</strong> מעל הממוצע (מתאמנים טבעיים מתקדמים).</li>
+                                <li><strong>22–25:</strong> גנטיקה מעולה / רמה עילאית של מתאמן טבעי ותיק.</li>
+                                <li><strong>מעל 25:</strong> לרוב קשה מאוד עד בלתי אפשרי להשגה ללא עזרים כימיים.</li>
+                            </ul>
+                            <p className="bg-white dark:bg-black/20 p-2 rounded border border-black/5 dark:border-white/5 mt-2 font-medium">
+                                הנתון שלך, <strong dir="ltr">{format1Dec(current.ffmi)}</strong>, אומר ש{getDynamicFfmiExplanation(current.ffmi, profile?.gender ?? 'male')}
+                            </p>
+                            <p className="text-[10px] opacity-70 italic mt-2 border-t border-black/10 dark:border-white/10 pt-2">
+                                * מילה חשובה: הנוסחה מסתמכת על אחוז השומן שהזנת. אל תתקבע על המספר המדויק בכל יום, אלא על מגמת השינוי של המספר לאורך זמן.
+                            </p>
+                        </div>
+                    </Accordion>
+
+                    {/* Goal Based Feedback */}
+                    <div className="mt-4 text-xs leading-relaxed opacity-90 p-4 rounded-xl bg-indigo-50/50 dark:bg-indigo-900/10 border border-indigo-100/50 dark:border-indigo-800/30">
+                        <div className="font-bold mb-2 pb-2 border-b border-indigo-100 dark:border-indigo-800/30 flex items-center gap-2">
+                            <span>🎯</span> 
+                            איך הנתון מתקדם אל היעד שלך?
+                            <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 px-2 py-0.5 rounded text-[10px] mr-auto">
+                                {mainGoalLabel}
+                            </span>
+                        </div>
+                        {getFfmiGoalFeedback(mainGoalKey, current.ffmi, previous?.ffmi, (current.emaWeight - (previous?.emaWeight || 0)))}
+                    </div>
+
+                    {/* Mini History Graph */}
+                    <div className="mt-auto pt-4 border-t border-black/5 dark:border-white/5">
+                        <span className="text-[10px] font-bold opacity-50 uppercase tracking-wider mb-2 block">מגמת ה-FFMI (המדידות האחרונות):</span>
+                        <TrendLineChart data={processedData} dataKey="ffmi" color="#4f46e5" />
+                    </div>
                 </div>
 
-                <div className="bg-indigo-50 dark:bg-indigo-900/10 p-3 rounded-xl border border-indigo-100 dark:border-indigo-900/20 text-xs text-indigo-800 dark:text-indigo-200 leading-relaxed">
-                  <strong>איך הגענו לזה?</strong><br/>
-                  ה-FFMI חושב מתוך הגובה שלך ({profile?.height_cm || '?'} ס"מ), משקל המגמה ({format1Dec(current.emaWeight)} ק"ג) ואחוז השומן המוערך ({format1Dec(current.bf || 0)}%).
-                </div>
-
+                {/* 2. SMM Section with Custom Graph */}
                 {current.smm && (
-                  <div className="pt-3 border-t border-black/5 dark:border-white/5 flex flex-col gap-2">
-                      <div className="flex justify-between items-center">
-                          <strong className="text-lg tabular-nums text-indigo-600 dark:text-indigo-400" dir="ltr">{format1Dec(current.smm)} kg</strong>
-                          <span className="text-sm font-bold opacity-80" dir="ltr">:(Al-Gindan) שריר שלד נטו</span>
-                      </div>
-                      <div className="text-[11px] opacity-60 leading-relaxed">
-                        הערכה מתמטית למסת שריר השלד האקטיבית. מחושבת על בסיס קורלציה של המשקל מול היקף המותן והאגן. ירידה במותן בזמן שמשקל המגמה יציב, תעלה נתון זה.
-                      </div>
-                  </div>
+                    <div className="bg-gray-50 dark:bg-black/20 p-5 rounded-2xl border border-black/5 dark:border-white/5 relative shadow-sm flex flex-col h-full">
+                        <div className="flex justify-between items-start mb-2">
+                            <div className="flex flex-col">
+                                <h3 className="font-bold text-lg">שריר שלד נטו</h3>
+                                <span className="text-xs opacity-60">הערכת Al-Gindan (בק"ג)</span>
+                            </div>
+                            <div className="text-3xl font-black text-emerald-600 dark:text-emerald-400 tabular-nums leading-none tracking-tight" dir="ltr">
+                                {format1Dec(current.smm)}<span className="text-lg ml-1">kg</span>
+                            </div>
+                        </div>
+                        
+                        <div className="mt-3 text-xs leading-relaxed opacity-80 mb-4">
+                            הערכה מתמטית למסת שריר השלד האקטיבית שלך. מחושבת על בסיס קורלציה של המשקל המוחלק מול היקף המותן והאגן.
+                        </div>
+
+                        <Accordion title="איך המדד הזה עובד?">
+                            <div className="text-xs space-y-2 opacity-90">
+                                <p>
+                                    בעוד ש-FFMI מנרמל את המסה לגובה, מדד ה-SMM מציג את ההערכה האבסולוטית של מסת השריר הפעילה שלך בקילוגרמים. 
+                                </p>
+                                <p>
+                                    <strong>איך קוראים את המגמה? (בדיוק כמו FFMI)</strong><br/>
+                                    כאשר משקל המגמה נשאר יציב (או עולה), אך היקף המותן יורד, המערכת מסיקה שהעלייה באיכות ההרכב נובעת משריר שלד. 
+                                    אם אתה בחיטוב וה-SMM נשאר יציב - אתה עושה עבודה מעולה. אם אתה במסה וה-SMM עולה - המשקל שהוספת הוא שריר איכותי.
+                                </p>
+                            </div>
+                        </Accordion>
+
+                        {/* Goal Based Feedback for SMM */}
+                        <div className="mt-4 text-xs leading-relaxed opacity-90 p-4 rounded-xl bg-emerald-50/50 dark:bg-emerald-900/10 border border-emerald-100/50 dark:border-emerald-800/30">
+                            {getSmmGoalFeedback(mainGoalKey, current.smm, previous?.smm, (current.emaWeight - (previous?.emaWeight || 0)))}
+                        </div>
+
+                        {/* Mini History Graph */}
+                        <div className="mt-auto pt-4 border-t border-black/5 dark:border-white/5">
+                            <span className="text-[10px] font-bold opacity-50 uppercase tracking-wider mb-2 block">מגמת מסת השריר האבסולוטית בק"ג:</span>
+                            <TrendLineChart data={processedData} dataKey="smm" color="#10b981" />
+                        </div>
+                    </div>
                 )}
+                
               </div>
             ) : (
-              <div className="text-sm opacity-60 text-center py-8">חסרים נתוני גובה או אחוז שומן לחישוב מדדים מתקדמים.</div>
+              <div className="text-sm opacity-60 text-center py-8 bg-gray-50 dark:bg-white/5 rounded-2xl">
+                חסרים נתוני גובה או אחוז שומן לחישוב מדדים מתקדמים. אנא עדכן אותם בלשונית המדידות.
+              </div>
             )}
           </SectionCard>
         )}
@@ -648,16 +657,6 @@ export default function BodyComposition({
           <SectionCard 
             title="אסתטיקה ופרופורציות (Ratios)"
             subtitle="מדדים אובייקטיביים הבוחנים את יחס ההיקפים שלך. ככל שהמדד מתקרב ליעד, הפרופורציות משתפרות."
-            explanation={
-                <div className="space-y-3">
-                  <p>במקום להסתכל רק על המשקל, המערכת משווה בין ההיקפים השונים. שיפור כאן מעיד על שינוי פיזי משמעותי גם אם המשקל "תקוע".</p>
-                  <ul className="list-disc list-inside space-y-1">
-                    <li><strong>V-Taper:</strong> מותן צרה ביחס לחזה רחב (מבנה משולש אתלטי).</li>
-                    <li><strong>שעון חול / בריאות:</strong> אינדיקציה חזקה לשריפת שומן בטני (ויסרלי) וירידה בהיקף המותן ביחס לאגן.</li>
-                    <li><strong>דומיננטיות:</strong> כתפיים רחבות הנישאות על מותן צרה. מדד קלאסי למראה אתלטי.</li>
-                  </ul>
-                </div>
-            }
           >
             <div className="space-y-4">
                 <RatioBar 
@@ -713,19 +712,10 @@ export default function BodyComposition({
 
       {/* 2. RADAR - DECOUPLED FROM WEIGHT */}
       <div className="mb-8">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-2 mb-4">
-          <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wide">רדאר היקפים: נתונים פיזיים</h3>
-          {correlationMessage && (
-            <div className="text-[11px] font-medium bg-indigo-50 dark:bg-indigo-900/20 text-indigo-800 dark:text-indigo-200 px-3 py-1.5 rounded-lg border border-indigo-100 dark:border-indigo-800/30 shadow-sm">
-              {correlationMessage}
-            </div>
-          )}
-        </div>
-
+        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-4">רדאר היקפים: נתונים פיזיים</h3>
         <SectionCard 
             title="השוואת היקפים (Radar)" 
             subtitle="השוואה ישירה של כל היקף מול הפעם הקודמת שהוא נמדד."
-            explanation="הגרפים הפיזיים מראים לך איפה בדיוק הגוף השתנה. המערכת מחפשת את המדידה הקודמת עבור כל אזור ספציפי (גם אם נמדד בנפרד מהמשקל) ומראה האם עלית (ירוק בשרירים) או ירדת (ירוק בשומן)."
         >
             <div className="grid md:grid-cols-2 gap-6">
             {/* כרטיס מדדי שומן */}
@@ -762,16 +752,6 @@ export default function BodyComposition({
         <SectionCard 
             title="גרף מגמה: מסה רזה (LBM) לעומת מסת שומן (FM)"
             subtitle="מעקב אבסולוטי בקילוגרמים (ולא באחוזים) אחר הרכב הגוף שלך לאורך זמן."
-            explanation={
-                <div className="space-y-3">
-                  <p>אחוז שומן יכול להטעות - אם עלית 2 קילו שריר ולא שינית את כמות השומן, אחוז השומן שלך ירד, למרות שלא שרפת גרם שומן! לכן הגרף הזה מציג קילוגרמים מוחלטים:</p>
-                  <ul className="list-disc list-inside space-y-1">
-                    <li><strong>מסת שומן (FM - צהוב):</strong> משקל רקמת השומן הטהורה. ירידה כאן אומרת שבאמת שרפת שומן.</li>
-                    <li><strong>מסת גוף רזה (LBM - כחול):</strong> משקל הגוף ללא שומן (שריר, נוזלים, עצם). עליה בקו זה מעידה על צבירת מסה והתאוששות.</li>
-                  </ul>
-                  <p>ברקומפוזיציה טובה, נראה את הקו הכחול עולה ואת הצהוב יורד - גם אם המשקל הכולל לא זז.</p>
-                </div>
-            }
         >
           <div className="bg-white dark:bg-[#1a1a1a] p-4 rounded-xl border border-gray-200 dark:border-white/5 shadow-inner">
               <div className="flex justify-center md:justify-end gap-6 mb-4 text-xs font-medium">
@@ -788,6 +768,125 @@ export default function BodyComposition({
 }
 
 // --- Sub-components for UI ---
+
+function Accordion({ title, children }: { title: string, children: React.ReactNode }) {
+    const [isOpen, setIsOpen] = useState(false);
+    
+    return (
+        <div className="mt-2 border border-black/5 dark:border-white/10 rounded-lg overflow-hidden bg-white dark:bg-black/10">
+            <button 
+                onClick={() => setIsOpen(!isOpen)} 
+                className="w-full text-right p-3 flex justify-between items-center text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
+            >
+                <div className="flex items-center gap-2">
+                    <span className="opacity-60 text-lg">💡</span> {title}
+                </div>
+                <span className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}>▼</span>
+            </button>
+            <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                <div className="overflow-hidden">
+                    <div className="p-4 pt-0 border-t border-black/5 dark:border-white/5 mt-2">
+                        {children}
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+function FfmiGauge({ ffmi, gender }: { ffmi: number, gender: string }) {
+    const isFemale = gender === 'female';
+    const min = isFemale ? 13 : 15;
+    const max = isFemale ? 24 : 28;
+    
+    const pct = Math.max(0, Math.min(100, ((ffmi - min) / (max - min)) * 100));
+
+    // Markers
+    const getMarkerPct = (val: number) => ((val - min) / (max - min)) * 100;
+    
+    const markers = isFemale 
+        ? [ {v: 15, l: 'מתחילה'}, {v: 17, l: 'ממוצע'}, {v: 19, l: 'מתקדמת'}, {v: 21, l: 'עילאי'} ]
+        : [ {v: 18, l: 'מתחיל'}, {v: 20, l: 'ממוצע'}, {v: 22, l: 'מתקדם'}, {v: 25, l: 'עילאי'} ];
+
+    return (
+        <div className="mt-4 mb-6 relative px-2">
+            <div className="relative h-4 w-full rounded-full bg-gradient-to-l from-purple-500 via-emerald-400 to-amber-300 shadow-inner">
+                {/* Pointer */}
+                <div 
+                    className="absolute top-1/2 w-1.5 h-6 bg-gray-900 dark:bg-white rounded-full shadow-md z-10 transition-all duration-1000 ease-out" 
+                    style={{ left: `${pct}%`, transform: 'translate(-50%, -50%)' }}
+                />
+            </div>
+            {/* Legend / Axis */}
+            <div className="relative h-6 mt-1 text-[9px] font-bold opacity-60">
+                {markers.map((m, i) => (
+                    <div key={i} className="absolute text-center" style={{ left: `${getMarkerPct(m.v)}%`, transform: 'translateX(-50%)' }}>
+                        <div className="h-1 w-px bg-gray-400 mx-auto mb-0.5"></div>
+                        {m.v} <span className="hidden sm:inline">({m.l})</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function getDynamicFfmiExplanation(ffmi: number, gender: string) {
+    if (gender === 'female') {
+        if (ffmi < 15) return 'את נמצאת בנקודת פתיחה קלאסית. יש לך המון פוטנציאל לגדילה ("Newbie Gains") ומקום רב לבניית שריר חדש.';
+        if (ffmi < 17) return 'את במצב ממוצע וטוב, בסיס מעולה להמשך אימונים ועיצוב הגוף.';
+        if (ffmi < 19) return 'את מציגה מסת שריר מעל הממוצע! זוהי תוצאה של אימוני התנגדות עקביים ותזונה נכונה.';
+        if (ffmi <= 21) return 'רמה עילאית וגנטיקה מעולה! השגת תוצאה יוצאת דופן של מסת שריר פעילה.';
+        return 'מסת שריר חריגה מאוד, לרוב ברמה תחרותית מקצועית.';
+    } else {
+        if (ffmi < 18) return 'אתה נמצא כרגע בנקודת פתיחה קלאסית. יש לך המון פוטנציאל לגדילה ("Newbie Gains") ומקום רב לבניית מסת שריר חדשה.';
+        if (ffmi < 20) return 'אתה במצב ממוצע, בסיס מעולה להמשך בניית מסת שריר באימונים.';
+        if (ffmi < 22) return 'אתה מציג מסת שריר מעל הממוצע, תוצאה של אימונים טבעיים עקביים ומתקדמים.';
+        if (ffmi <= 25) return 'רמה עילאית וגנטיקה מעולה! השגת תוצאה יוצאת דופן כמתאמן טבעי ותיק.';
+        return 'מסת שריר חריגה מאוד, לרוב מעבר לגבול הטבעי.';
+    }
+}
+
+function getFfmiCategoryText(ffmi: number) {
+    if (ffmi < 18) return 'מתחת לממוצע / מתחיל';
+    if (ffmi < 20) return 'ממוצע';
+    if (ffmi < 22) return 'מעל הממוצע (מתקדם)';
+    if (ffmi <= 25) return 'גנטיקה מעולה / עילאי';
+    return 'מעבר לגבול הטבעי (>25)';
+}
+
+function getFfmiGoalFeedback(goalKey: string, currentFfmi: number, prevFfmi?: number, weightDelta: number = 0) {
+    if (!prevFfmi) return <span className="opacity-70">ממתינים למדידה נוספת (שתכלול משקל, היקפים ואחוז שומן) כדי לזהות מגמה ולוודא התאמה ליעד שלך.</span>;
+    
+    const ffmiDelta = currentFfmi - prevFfmi;
+
+    if (goalKey.includes('bulk')) {
+       if (ffmiDelta > 0) return <span className="text-emerald-700 dark:text-emerald-400"><strong>✅ סימן להתקדמות (חיובי):</strong> ה-FFMI שלך עולה! זה אומר שהעלייה שלך במשקל היא אכן מסת שריר איכותית ולא רק שומן ונוזלים. עבודה מעולה.</span>;
+       if (ffmiDelta <= 0 && weightDelta > 0) return <span className="text-amber-700 dark:text-amber-500"><strong>⚠️ תמרור אזהרה (שלילי):</strong> המשקל שלך עולה, אבל ה-FFMI נשאר תקוע או יורד. המשמעות: אתה בפלוס קלורי, אבל רוב המשקל שהוספת הוא שומן. בדוק את החלבון ועצימות האימון.</span>;
+       return <span>המשקל ומסת השריר נותרו יציבים. כדי לראות עלייה נדרש לעבור לפלוס קלורי קל.</span>;
+    }
+    
+    if (goalKey.includes('cut')) {
+       if (ffmiDelta >= -0.05) return <span className="text-emerald-700 dark:text-emerald-400"><strong>✅ סימן להתקדמות (חיובי):</strong> המשקל הכללי שלך יורד, אבל ה-FFMI שלך נשאר יציב (או אפילו עולה מעט). זה אומר שאתה שורף שומן ומצליח באופן מושלם לשמור על השריר הקיים!</span>;
+       if (ffmiDelta < -0.1) return <span className="text-red-600 dark:text-red-400"><strong>⛔ תמרור אזהרה (שלילי):</strong> אתה יורד במשקל וה-FFMI שלך צונח. המשמעות: הגירעון הקלורי שלך אגרסיבי מדי, או שאינך צורך מספיק חלבון, והגוף מפרק שריר במקום שומן.</span>;
+       return <span>המשקל יציב ומסת השריר נשמרת היטב בחיטוב.</span>;
+    }
+    
+    // Recomp or default
+    if (ffmiDelta > 0) return <span className="text-emerald-700 dark:text-emerald-400"><strong>✅ סימן להתקדמות (חיובי):</strong> ה-FFMI עולה! אתה מצליח לבנות שריר שלד.</span>;
+    if (ffmiDelta < -0.1) return <span className="text-amber-700 dark:text-amber-500"><strong>⚠️ תמרור אזהרה (שלילי):</strong> המערכת מזהה איבוד של מסת שריר. שים לב לצריכת החלבון ולהתאוששות שלך.</span>;
+    
+    return <span className="opacity-70">הנתון יציב. במצב של ריקומפוזיציה זו אינדיקציה טובה שאינך מאבד שריר, אך כדי לגדול נסה להרים כבד יותר ולייצר פרוגרסיב אוברלוד.</span>;
+}
+
+function getSmmGoalFeedback(goalKey: string, currentSmm: number, prevSmm?: number, weightDelta: number = 0) {
+    if (!prevSmm) return <span className="opacity-70">ממתינים למדידה נוספת כדי להציג את קצב בניית השריר בק"ג.</span>;
+    const smmDelta = currentSmm - prevSmm;
+    
+    if (smmDelta > 0.2) return <span className="text-emerald-700 dark:text-emerald-400"><strong>✅ מעולה!</strong> הוספת {format1Dec(smmDelta)} ק"ג של שריר שלד מאז המדידה הקודמת. המגמה מאוד חיובית לאור היעד שהצבת.</span>;
+    if (smmDelta < -0.2) return <span className="text-red-600 dark:text-red-400"><strong>⚠️ שים לב:</strong> ישנה ירידה משוערת של {Math.abs(smmDelta).toFixed(1)} ק"ג שריר שלד. ודא שצריכת החלבון מספקת.</span>;
+    return <span className="opacity-70">מסת שריר השלד (בק"ג) יציבה ושמורה היטב.</span>;
+}
+
 
 function RatioBar({ 
     label, 
@@ -882,68 +981,89 @@ function RatioBar({
     );
 }
 
-function getFfmiCategory(ffmi: number, gender: Gender | null) {
-    const isFemale = gender === 'female';
-    if (isFemale) {
-        if (ffmi >= 21) return 'חריג / עילית';
-        if (ffmi >= 19) return 'אתלטי / מתאמן עקבי';
-        if (ffmi >= 17) return 'ממוצע פלוס';
-        return 'נקודת פתיחה / ממוצע';
-    } else {
-        if (ffmi >= 25) return 'גבול טבעי עליון';
-        if (ffmi >= 22) return 'אתלטי / מתקדם';
-        if (ffmi >= 20) return 'ממוצע פלוס / מתאמן';
-        return 'נקודת פתיחה / ממוצע';
-    }
-}
-
 // --- Custom SVG Charts ---
+
+function TrendLineChart({ data, dataKey, color }: { data: any[], dataKey: string, color: string }) {
+    // מציג רק את 5 הנקודות האחרונות
+    const chartData = data.length > 5 ? data.slice(-5) : data;
+    if (chartData.length < 2) return <div className="text-center text-[10px] opacity-50 py-2">אין מספיק נתונים לגרף</div>;
+
+    const vals = chartData.map(d => d[dataKey]).filter(v => v != null);
+    if (vals.length === 0) return null;
+
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const range = (max - min) || 1; // Prevent division by zero
+    const padding = range * 0.2; // Add 20% padding top and bottom
+
+    const yMin = min - padding;
+    const yMax = max + padding;
+    const yRange = yMax - yMin;
+
+    const getX = (index: number) => (index / (chartData.length - 1)) * 100;
+    const getY = (val: number) => 100 - ((val - yMin) / yRange) * 100;
+
+    const points = chartData.map((d, i) => {
+        if (d[dataKey] == null) return '';
+        return `${getX(i)},${getY(d[dataKey])}`;
+    }).filter(p => p !== '').join(' ');
+
+    return (
+        <div className="relative w-full h-24 mt-4 mb-2" dir="ltr">
+            {/* Simple Grid */}
+            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-10 z-0">
+                <div className="border-b border-black dark:border-white h-0"></div>
+                <div className="border-b border-black dark:border-white h-0"></div>
+            </div>
+
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full overflow-visible z-0">
+                <polyline points={points} fill="none" stroke={color} strokeWidth="2.5" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+
+            {chartData.map((d, i) => {
+                if (d[dataKey] == null) return null;
+                const xPct = getX(i);
+                const yPct = getY(d[dataKey]);
+
+                return (
+                    <div key={i} className="absolute inset-0 pointer-events-none z-10">
+                        {/* Dot */}
+                        <div className="absolute w-2 h-2 rounded-full border border-white dark:border-[#1a1a1a] shadow-sm" style={{ backgroundColor: color, left: `${xPct}%`, top: `${yPct}%`, transform: 'translate(-50%, -50%)' }}></div>
+                        {/* Value */}
+                        <div className="absolute text-[9px] font-bold" style={{ color: color, left: `${xPct}%`, top: `calc(${yPct}% - 14px)`, transform: 'translateX(-50%)' }}>
+                            {format1Dec(d[dataKey])}
+                        </div>
+                        {/* Date */}
+                        <div className="absolute text-[8px] text-gray-500 font-medium whitespace-nowrap" style={{ left: `${xPct}%`, bottom: '-14px', transform: 'translateX(-50%)' }}>
+                            {formatDateShort(d.date)}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
 
 function StatBox({ 
     label, 
     current, 
     prev, 
     unit, 
-    reverseColors, 
-    actionPlan 
+    reverseColors 
 }: { 
     label: string, 
     current: number | null | undefined, 
     prev: number | null | undefined, 
     unit: string, 
-    reverseColors: boolean, 
-    actionPlan?: { why: string, diet: string, training: string } 
+    reverseColors: boolean
 }) {
-  const [isOpen, setIsOpen] = useState(false);
 
   if (current == null || prev == null) {
       return (
-        <div className="bg-white/60 dark:bg-black/20 p-3 rounded-xl border border-black/5 dark:border-white/5 flex flex-col justify-start shadow-sm transition-all">
-          <div className="flex justify-between items-start w-full">
-            <span className="text-[10px] md:text-xs font-bold opacity-70 border-b border-dashed border-gray-400 dark:border-gray-600 pb-0.5 inline-block">{label}</span>
-            {actionPlan && (
-              <button onClick={() => setIsOpen(!isOpen)} className="text-[10px] bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 px-1.5 py-0.5 rounded transition-colors flex items-center gap-1">
-                <span className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}>▼</span>
-              </button>
-            )}
-          </div>
-          
-          <div className="text-center flex flex-col items-center justify-center my-3">
-             <span className="text-lg md:text-xl font-black leading-none tabular-nums" dir="ltr">--</span>
-             <span className="text-[10px] font-bold text-gray-500 tabular-nums mt-1" dir="ltr">חסר נתון</span>
-          </div>
-
-          {actionPlan && (
-            <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out text-right w-full ${isOpen ? 'grid-rows-[1fr] mt-1' : 'grid-rows-[0fr]'}`}>
-                <div className="overflow-hidden">
-                    <div className="pt-3 border-t border-black/5 dark:border-white/5 text-[10px] leading-relaxed space-y-2 mt-2">
-                        <p><strong className="text-indigo-600 dark:text-indigo-400">למה זה חשוב?</strong><br/><span className="opacity-80">{actionPlan.why}</span></p>
-                        <p><strong>🥗 תזונה:</strong><br/><span className="opacity-80">{actionPlan.diet}</span></p>
-                        <p><strong>🏋️ אימון:</strong><br/><span className="opacity-80">{actionPlan.training}</span></p>
-                    </div>
-                </div>
-            </div>
-          )}
+        <div className="bg-white/60 dark:bg-black/20 p-3 rounded-xl border border-black/5 dark:border-white/5 text-center flex flex-col justify-center shadow-sm">
+          <span className="text-[10px] md:text-xs font-bold opacity-70 mb-1">{label}</span>
+          <span className="text-lg md:text-xl font-black leading-none mb-1 tabular-nums" dir="ltr">--</span>
+          <span className="text-[10px] font-bold text-gray-500 tabular-nums" dir="ltr">חסר נתון</span>
         </div>
       );
   }
@@ -962,36 +1082,14 @@ function StatBox({
   }
 
   return (
-    <div className="bg-white/60 dark:bg-black/20 p-3 rounded-xl border border-black/5 dark:border-white/5 flex flex-col justify-start shadow-sm transition-all">
-      <div className="flex justify-between items-start w-full">
-        <span className="text-[10px] md:text-xs font-bold opacity-70 border-b border-dashed border-gray-400 dark:border-gray-600 pb-0.5 inline-block">{label}</span>
-        {actionPlan && (
-          <button onClick={() => setIsOpen(!isOpen)} className="text-[10px] bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 px-1.5 py-0.5 rounded transition-colors flex items-center gap-1">
-            <span className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}>▼</span>
-          </button>
-        )}
-      </div>
-      
-      <div className="text-center flex flex-col items-center justify-center my-3">
-         <span className="text-lg md:text-xl font-black leading-none tabular-nums" dir="ltr">
-            {format1Dec(current)}<span className="text-[10px] font-normal ml-0.5">{unit}</span>
-         </span>
-         <span className={`text-[10px] font-bold ${colorClass} tabular-nums mt-1`} dir="ltr">
-            {isNeutral ? 'ללא שינוי' : `${isPositive ? '+' : ''}${format1Dec(delta)}${unit}`}
-         </span>
-      </div>
-
-      {actionPlan && (
-        <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out text-right w-full ${isOpen ? 'grid-rows-[1fr] mt-1' : 'grid-rows-[0fr]'}`}>
-            <div className="overflow-hidden">
-                <div className="pt-3 border-t border-black/5 dark:border-white/5 text-[10px] leading-relaxed space-y-2 mt-2">
-                    <p><strong className="text-indigo-600 dark:text-indigo-400">למה זה חשוב?</strong><br/><span className="opacity-80">{actionPlan.why}</span></p>
-                    <p><strong>🥗 תזונה:</strong><br/><span className="opacity-80">{actionPlan.diet}</span></p>
-                    <p><strong>🏋️ אימון:</strong><br/><span className="opacity-80">{actionPlan.training}</span></p>
-                </div>
-            </div>
-        </div>
-      )}
+    <div className="bg-white/60 dark:bg-black/20 p-3 rounded-xl border border-black/5 dark:border-white/5 text-center flex flex-col justify-center shadow-sm">
+      <span className="text-[10px] md:text-xs font-bold opacity-70 mb-1">{label}</span>
+      <span className="text-lg md:text-xl font-black leading-none mb-1 tabular-nums" dir="ltr">
+        {format1Dec(current)}<span className="text-[10px] font-normal ml-0.5">{unit}</span>
+      </span>
+      <span className={`text-[10px] font-bold ${colorClass} tabular-nums`} dir="ltr">
+        {isNeutral ? 'ללא שינוי' : `${isPositive ? '+' : ''}${format1Dec(delta)}${unit}`}
+      </span>
     </div>
   );
 }
@@ -1041,17 +1139,25 @@ function BfGauge({ bf, gender }: { bf: number, gender: string }) {
 }
 
 function EmaChart({ data }: { data: any[] }) {
-    if (data.length < 2) return null;
+    if (data.length === 0) return null;
     
-    const allWeights = [...data.map(d => d.rawWeight), ...data.map(d => d.emaWeight)];
+    // מציג רק את הראשונה ומקסימום את ה-4 האחרונות
+    let displayData = data;
+    if (data.length > 5) {
+        displayData = [data[0], ...data.slice(-4)];
+    }
+
+    if (displayData.length < 2) return null;
+    
+    const allWeights = [...displayData.map(d => d.rawWeight), ...displayData.map(d => d.emaWeight)];
     const minW = Math.floor(Math.min(...allWeights)) - 1;
     const maxW = Math.ceil(Math.max(...allWeights)) - 1;
-    const range = maxW - minW;
+    const range = (maxW - minW) || 1;
 
-    const getX = (index: number) => (index / (data.length - 1)) * 100;
+    const getX = (index: number) => (index / (displayData.length - 1)) * 100;
     const getY = (val: number) => 100 - ((val - minW) / range) * 100;
 
-    const emaPoints = data.map((d, i) => `${getX(i)},${getY(d.emaWeight)}`).join(' ');
+    const emaPoints = displayData.map((d, i) => `${getX(i)},${getY(d.emaWeight)}`).join(' ');
 
     return (
         <div className="relative w-full h-56 mt-6 mb-8" dir="ltr">
@@ -1070,7 +1176,7 @@ function EmaChart({ data }: { data: any[] }) {
                 <polyline points={emaPoints} fill="none" stroke="#4f46e5" strokeWidth="2.5" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
 
-            {data.map((d, i) => {
+            {displayData.map((d, i) => {
                 const xPct = getX(i);
                 const rawY = getY(d.rawWeight);
                 const emaY = getY(d.emaWeight);
@@ -1078,7 +1184,7 @@ function EmaChart({ data }: { data: any[] }) {
                 return (
                     <div key={i} className="absolute inset-0 pointer-events-none z-10">
                         <div className="absolute text-[10px] text-gray-500 font-medium whitespace-nowrap" style={{ left: `${xPct}%`, bottom: '-20px', transform: 'translateX(-50%)' }}>
-                            {d.date.toLocaleDateString('he-IL').slice(0, 5)}
+                            {formatDateShort(d.date)}
                         </div>
                         <div className="absolute w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full" style={{ left: `${xPct}%`, top: `${rawY}%`, transform: 'translate(-50%, -50%)' }}></div>
                         <div className="absolute text-[9px] opacity-60 font-bold" style={{ left: `${xPct}%`, top: `calc(${rawY}% + 6px)`, transform: 'translateX(-50%)' }}>
@@ -1106,7 +1212,7 @@ function CrossGraph({ data }: { data: any[] }) {
   
   const min = Math.max(0, Math.min(...allVals) - 3);
   const max = Math.max(...allVals) + 3;
-  const range = max - min;
+  const range = (max - min) || 1;
 
   const getPoints = (arr: number[]) => arr.map((val, i) => {
     if (val == null) return '';
@@ -1135,7 +1241,7 @@ function CrossGraph({ data }: { data: any[] }) {
         return (
           <div key={i} className="absolute inset-0 pointer-events-none z-10">
             <div className="absolute text-[10px] text-gray-500 font-medium whitespace-nowrap" style={{ left: `${xPct}%`, bottom: '-24px', transform: 'translateX(-50%)' }}>
-              {d.date.toLocaleDateString('he-IL').slice(0, 5)}
+              {formatDateShort(d.date)}
             </div>
 
             {d.lbm != null && (
