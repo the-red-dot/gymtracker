@@ -1,4 +1,5 @@
 // src/app/profile/page.tsx
+
 'use client';
 
 // ===== SECTION 1 TITLE: Imports & Setup =====
@@ -362,7 +363,7 @@ export default function ProfilePage() {
     if (error) setError(error.message);
   };
 
-  // ----- כיול TDEE חכם (מעודכן לחלון דינמי עד 90 ימים) -----
+  // ----- כיול TDEE חכם (מעודכן לחלון דינמי עד 35 ימים) -----
   const handleCalibrateTDEE = async () => {
     if (!userId) return;
     setCalibrating(true);
@@ -370,12 +371,12 @@ export default function ProfilePage() {
     setCalibrationResult(null);
 
     try {
-      const daysToLookBack = 90; // מסתכל אחורה עד 3 חודשים כדי למצוא את החלון הטוב ביותר
+      const daysToLookBack = 35; // מסתכל אחורה עד 35 ימים (5 שבועות) כדי למצוא את החלון העדכני הטוב ביותר
       const lookBackDate = new Date();
       lookBackDate.setDate(lookBackDate.getDate() - daysToLookBack);
       const isoStart = lookBackDate.toISOString();
 
-      // 1. קבלת מדידות משקל מ-90 הימים האחרונים
+      // 1. קבלת מדידות משקל מ-35 הימים האחרונים
       const { data: measData, error: measErr } = await supabase
         .from('body_measurements')
         .select('measured_at, weight_kg')
@@ -389,7 +390,7 @@ export default function ProfilePage() {
         throw new Error(`לא נמצאו מספיק שקילות ב-${daysToLookBack} הימים האחרונים. נדרשות לפחות 2 שקילות במרווחי זמן כדי לכייל את המערכת.`);
       }
 
-      // 2. קבלת כל נתוני התזונה מ-90 הימים האחרונים במכה אחת
+      // 2. קבלת כל נתוני התזונה מ-35 הימים האחרונים במכה אחת
       const { data: nutData, error: nutErr } = await supabase
         .from('nutrition_entries')
         .select('occurred_at, calories')
@@ -836,7 +837,7 @@ export default function ProfilePage() {
                     כיול מטבולי חכם (Adaptive TDEE)
                   </h3>
                   <p className="text-xs opacity-80 max-w-lg leading-relaxed">
-                    המערכת מנתחת את צריכת הקלוריות והמשקל שלך (עד 90 ימים אחורה), מאתרת את רצף הנתונים האמין ביותר, ומחשבת במדויק כמה קלוריות הגוף <b>שלך</b> שורף בפועל.
+                    המערכת מנתחת את צריכת הקלוריות והמשקל שלך (עד 35 ימים אחורה), מאתרת את רצף הנתונים האמין ביותר, ומחשבת במדויק כמה קלוריות הגוף <b>שלך</b> שורף בפועל.
                   </p>
                 </div>
                 {customTdee && (

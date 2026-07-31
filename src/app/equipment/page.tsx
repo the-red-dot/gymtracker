@@ -106,6 +106,7 @@ const PLACEHOLDER_IMG =
 const toText = (v: string | null | undefined) => (v ?? '').trim();
 // ===== End Section 1 =====
 
+
 // ===== Section 2 — Component: State, Auth & Data Load =====
 export default function EquipmentPage() {
   const router = useRouter();
@@ -120,10 +121,10 @@ export default function EquipmentPage() {
     
   // DB equipment + selections (for ALL equipment list)
   const [equipViews, setEquipViews] = useState<EquipView[]>([]);
-  const [selected, setSelected] = useState<Set<number>>(new Set()); // selection for CURRENT TAB
-  const [selectedInitial, setSelectedInitial] = useState<Set<number>>(new Set());
+  const [selected, setSelected] = useState<number[]>([]); // CHANGED to Array to preserve order
+  const [selectedInitial, setSelectedInitial] = useState<number[]>([]);
   // Map to hold selections for ALL tabs (needed for AI Refresh)
-  const [allTabsSelections, setAllTabsSelections] = useState<Record<number, Set<number>>>({});
+  const [allTabsSelections, setAllTabsSelections] = useState<Record<number, number[]>>({});
 
   // JSON exercises
   const [_exercisesJson, setExercisesJson] = useState<ExerciseJson[]>([]);
@@ -264,34 +265,35 @@ export default function EquipmentPage() {
     // Fetch all equipment selections for this user
     const { data, error } = await supabase
       .from('user_tab_equipment')
-      .select('tab_id, equipment_id')
-      .eq('user_id', uid);
+      .select('tab_id, equipment_id, order_index')
+      .eq('user_id', uid)
+      .order('order_index', { ascending: true }); // Order by user preference
 
     if (error) {
       console.error('Error loading selections:', error);
       return {};
     }
 
-    const map: Record<number, Set<number>> = {};
-    // Initialize empty sets for known tabs
-    currentTabs.forEach(t => map[t.id] = new Set());
+    const map: Record<number, number[]> = {};
+    // Initialize empty arrays for known tabs
+    currentTabs.forEach(t => map[t.id] = []);
     
-    // Fill with data
+    // Fill with data preserving the sorted order from the DB
     (data || []).forEach((r: any) => {
-      if (!map[r.tab_id]) map[r.tab_id] = new Set();
-      map[r.tab_id].add(r.equipment_id);
+      if (!map[r.tab_id]) map[r.tab_id] = [];
+      map[r.tab_id].push(r.equipment_id);
     });
 
     setAllTabsSelections(map);
     return map; // Return the map so we can use it immediately
   }
 
-  function updateLocalSelectionFromMap(tabId: number, overrideMap?: Record<number, Set<number>>) {
+  function updateLocalSelectionFromMap(tabId: number, overrideMap?: Record<number, number[]>) {
     // Use the override map if provided (for immediate updates), otherwise use state
     const sourceMap = overrideMap || allTabsSelections;
-    const ids = sourceMap[tabId] || new Set();
-    setSelected(new Set(ids));
-    setSelectedInitial(new Set(ids));
+    const ids = sourceMap[tabId] || [];
+    setSelected([...ids]);
+    setSelectedInitial([...ids]);
   }
 
   async function loadTabSelection(uid: string, tabId: number) {
@@ -384,8 +386,8 @@ export default function EquipmentPage() {
     const newTab: WorkoutTab = { id: data.id, name: data.name, emoji: data.emoji, order_index: data.order_index };
     const next = [...tabs, newTab].sort((a, b) => a.order_index - b.order_index);
     setTabs(next);
-    // Initialize empty selection set for new tab
-    setAllTabsSelections(prev => ({ ...prev, [newTab.id]: new Set() }));
+    // Initialize empty selection array for new tab
+    setAllTabsSelections(prev => ({ ...prev, [newTab.id]: [] }));
     
     setActiveTabId(newTab.id);
     updateLocalSelectionFromMap(newTab.id);
@@ -428,8 +430,8 @@ export default function EquipmentPage() {
       updateLocalSelectionFromMap(newActive);
     } else {
       setActiveTabId(null);
-      setSelected(new Set());
-      setSelectedInitial(new Set());
+      setSelected([]);
+      setSelectedInitial([]);
     }
   }
 
@@ -440,32 +442,30 @@ export default function EquipmentPage() {
     setError(null);
 
     try {
-      const toInsert = diffPlus(selected, selectedInitial);
-      const toDelete = diffPlus(selectedInitial, selected);
+      const payload = selected.map((equipment_id, idx) => ({
+        user_id: userId,
+        tab_id: activeTabId,
+        equipment_id,
+        order_index: idx + 1
+      }));
 
-      if (toInsert.length) {
-        const payload = toInsert.map((equipment_id) => ({
-          user_id: userId,
-          tab_id: activeTabId,
-          equipment_id,
-        }));
-        const { error } = await supabase.from('user_tab_equipment').insert(payload);
-        if (error) throw new Error(error.message);
+      // Delete old selections cleanly for this tab
+      const { error: delErr } = await supabase
+        .from('user_tab_equipment')
+        .delete()
+        .eq('user_id', userId)
+        .eq('tab_id', activeTabId);
+      if (delErr) throw new Error(delErr.message);
+
+      // Insert fresh selections with correct order
+      if (payload.length) {
+        const { error: insErr } = await supabase.from('user_tab_equipment').insert(payload);
+        if (insErr) throw new Error(insErr.message);
       }
 
-      if (toDelete.length) {
-        const { error } = await supabase
-          .from('user_tab_equipment')
-          .delete()
-          .eq('user_id', userId)
-          .eq('tab_id', activeTabId)
-          .in('equipment_id', toDelete);
-        if (error) throw new Error(error.message);
-      }
-
-      setSelectedInitial(new Set(selected));
+      setSelectedInitial([...selected]);
       // Update the global map too
-      setAllTabsSelections(prev => ({ ...prev, [activeTabId]: new Set(selected) }));
+      setAllTabsSelections(prev => ({ ...prev, [activeTabId]: [...selected] }));
 
     } catch (e: any) {
       setError(e?.message || 'שגיאה בשמירת הבחירות');
@@ -529,10 +529,11 @@ export default function EquipmentPage() {
         totalTabs++;
         
         if (t.equipment_ids && t.equipment_ids.length > 0) {
-          const payload = t.equipment_ids.map((eid: number) => ({
+          const payload = t.equipment_ids.map((eid: number, idx: number) => ({
             user_id: userId,
             tab_id: newTab.id,
-            equipment_id: eid
+            equipment_id: eid,
+            order_index: idx + 1
           }));
           
           const { error: linkErr } = await supabase.from('user_tab_equipment').insert(payload);
@@ -623,8 +624,6 @@ export default function EquipmentPage() {
         setActiveTabId={async (id) => {
           if (id === activeTabId) return;
           setActiveTabId(id);
-          // Sync current selection first if saving needed? 
-          // (Right now we require manual save, so we just switch view)
           updateLocalSelectionFromMap(id);
         }}
         createTab={createTab}
@@ -656,13 +655,28 @@ export default function EquipmentPage() {
         // actions
         toggle={(id) => {
           setSelected((prev) => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
-            return next;
+            if (prev.includes(id)) return prev.filter((x) => x !== id);
+            return [...prev, id];
           });
         }}
-        clearSelection={() => setSelected(new Set())}
+        move={(id, newIndex) => {
+          setSelected(prev => {
+            const idx = prev.indexOf(id);
+            if (idx < 0) return prev;
+            
+            let targetIdx = newIndex;
+            if (targetIdx < 0) targetIdx = 0;
+            if (targetIdx >= prev.length) targetIdx = prev.length - 1;
+            
+            if (idx === targetIdx) return prev;
+            
+            const clone = [...prev];
+            const [item] = clone.splice(idx, 1);
+            clone.splice(targetIdx, 0, item);
+            return clone;
+          });
+        }}
+        clearSelection={() => setSelected([])}
         save={saveSelection}
         // preview controls
         openPreview={(url, alt) => setPreview({ url, alt })}
@@ -796,8 +810,6 @@ export default function EquipmentPage() {
 // ===== End Section 2 =====
 
 
-
-
 // ===== Section 3 — Stateless View & Filtering =====
 function EquipmentPageView(props: {
   // tabs
@@ -814,8 +826,8 @@ function EquipmentPageView(props: {
 
   // equipment list + selection
   equipViews: EquipView[];
-  selected: Set<number>;
-  selectedInitial: Set<number>;
+  selected: number[];
+  selectedInitial: number[];
 
   // search/filter
   search: string;
@@ -829,6 +841,7 @@ function EquipmentPageView(props: {
 
   // actions
   toggle: (id: number) => void;
+  move: (id: number, targetIdx: number) => void;
   clearSelection: () => void;
   save: () => Promise<void>;
   openPreview: (url: string, alt: string) => void;
@@ -852,6 +865,7 @@ function EquipmentPageView(props: {
     saving,
     error,
     toggle,
+    move,
     clearSelection,
     save,
     openPreview,
@@ -862,7 +876,8 @@ function EquipmentPageView(props: {
     let arr = equipViews;
 
     if (activeCat === 'picked') {
-      arr = arr.filter((e) => selected.has(e.id));
+      // Map based on selected array to preserve explicit user ordering
+      arr = selected.map(id => equipViews.find(e => e.id === id)).filter(Boolean) as EquipView[];
     } else if (activeCat !== 'all') {
       arr = arr.filter((e) => e.category === activeCat);
     }
@@ -1033,7 +1048,7 @@ function EquipmentPageView(props: {
           <div className="hidden md:flex gap-2 overflow-x-auto pb-1">
             {CATEGORIES.map((c) => {
               const isPicked = c.key === 'picked';
-              const pickedCount = isPicked ? (activeTabId ? selected.size : 0) : 0;
+              const pickedCount = isPicked ? (activeTabId ? selected.length : 0) : 0;
 
               return (
                 <button
@@ -1079,9 +1094,9 @@ function EquipmentPageView(props: {
                     <span>{activeCat === 'picked' ? '✅' : '○'}</span>
                     <span>הנבחרים שלי</span>
                 </div>
-                {activeTabId && selected.size > 0 && (
+                {activeTabId && selected.length > 0 && (
                    <span className={`text-[10px] px-2 rounded-full ${activeCat === 'picked' ? 'bg-white/20' : 'bg-black/5 dark:bg-white/10'}`}>
-                      {selected.size} מכשירים
+                      {selected.length} מכשירים
                    </span>
                 )}
              </button>
@@ -1109,7 +1124,7 @@ function EquipmentPageView(props: {
           </div>
       </div>
 
-      {/* גריד מכשירים (ללא שינוי, רק מציג קטגוריה אם מסונן) */}
+      {/* גריד מכשירים */}
       <section className="grid gap-6">
         {activeCat !== 'all' && activeCat !== 'picked' ? (
           <h2 className="text-xl font-semibold">{categoryHeb(activeCat as CategoryKey)}</h2>
@@ -1122,12 +1137,14 @@ function EquipmentPageView(props: {
             </div>
           )}
           {filtered.map((e) => {
-            const isOn = selected.has(e.id);
+            const isOn = selected.includes(e.id);
             const titleHe = e.name_he || e.name_en || 'לא ידוע';
             const subtitleEn =
               e.name_en && e.name_en.trim() !== '' && e.name_en.trim() !== e.name_he?.trim()
                 ? e.name_en
                 : '';
+
+            const realIdx = selected.indexOf(e.id);
 
             return (
               <article
@@ -1140,22 +1157,34 @@ function EquipmentPageView(props: {
                   }`}
                 onClick={() => activeTabId && toggle(e.id)}
               >
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs px-2 py-0.5 rounded-full border border-black/10 dark:border-white/20">
                       {e.body_area_he}
                     </span>
                   </div>
-                  <span
-                    className={`inline-flex items-center justify-center text-xs px-2 py-1 rounded-full border
-                      ${
-                        isOn
-                          ? 'bg-foreground text-background border-foreground'
-                          : 'border-black/10 dark:border-white/20'
-                      }`}
-                  >
-                    {isOn ? 'נבחר' : 'בחר'}
-                  </span>
+                  
+                  <div className="flex items-center gap-2">
+                    {/* שדה הזנת מיקום מספרי - יופיע רק כשמסתכלים על "הנבחרים שלי" */}
+                    {activeCat === 'picked' && activeTabId && (
+                      <OrderInput
+                        currentIdx={realIdx}
+                        maxIdx={selected.length - 1}
+                        onMove={(newIdx) => move(e.id, newIdx)}
+                      />
+                    )}
+                    
+                    <span
+                      className={`inline-flex items-center justify-center text-xs px-2 py-1 rounded-full border
+                        ${
+                          isOn
+                            ? 'bg-foreground text-background border-foreground'
+                            : 'border-black/10 dark:border-white/20'
+                        }`}
+                    >
+                      {isOn ? 'נבחר' : 'בחר'}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="mt-3 aspect-square overflow-hidden rounded-lg ring-1 ring-black/10 dark:ring-white/10 bg-white">
@@ -1212,9 +1241,8 @@ function EquipmentPageView(props: {
             <div className="text-sm text-center md:text-right">
               טאב נוכחי:{' '}
               <b>{(tabs.find((t) => t.id === activeTabId)?.name) || '—'}</b>{' '}
-              · <b>{selected.size}</b> מכשירים נבחרו
-              {diffPlus(selected, selectedInitial).length > 0 ||
-              diffPlus(selectedInitial, selected).length > 0 ? (
+              · <b>{selected.length}</b> מכשירים נבחרו
+              {JSON.stringify(selected) !== JSON.stringify(selectedInitial) ? (
                 <span className="opacity-70"> (יש שינויים שלא נשמרו)</span>
               ) : null}
             </div>
@@ -1357,6 +1385,72 @@ function diffPlus(a: Set<number>, b: Set<number>) {
 
 
 // ===== Section 6 — Small UI Bits =====
+
+// --- NEW: OrderInput Component ---
+function OrderInput({
+  currentIdx,
+  maxIdx,
+  onMove
+}: {
+  currentIdx: number;
+  maxIdx: number;
+  onMove: (newIdx: number) => void;
+}) {
+  const [val, setVal] = useState((currentIdx + 1).toString());
+
+  // Sync if external changes happen
+  useEffect(() => {
+    setVal((currentIdx + 1).toString());
+  }, [currentIdx]);
+
+  const handleCommit = () => {
+    let num = parseInt(val, 10);
+    if (isNaN(num)) {
+      setVal((currentIdx + 1).toString());
+      return;
+    }
+    if (num < 1) num = 1;
+    if (num > maxIdx + 1) num = maxIdx + 1;
+    
+    setVal(num.toString());
+    
+    // Call move only if it actually changed position
+    if (num - 1 !== currentIdx) {
+      onMove(num - 1);
+    }
+  };
+
+  return (
+    <div 
+      className="flex items-center gap-1 bg-black/5 dark:bg-white/10 rounded-lg px-2 py-1 shadow-inner cursor-text" 
+      dir="ltr" 
+      onClick={(e) => {
+        e.stopPropagation();
+        // Option to focus the input if the container is clicked
+        const input = e.currentTarget.querySelector('input');
+        if (input) input.focus();
+      }}
+    >
+      <span className="text-[10px] font-bold text-gray-500">#</span>
+      <input
+        type="number"
+        min={1}
+        max={maxIdx + 1}
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={handleCommit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.currentTarget.blur(); // Triggers onBlur to commit
+          }
+        }}
+        className="w-10 text-center rounded border border-black/20 dark:border-white/20 bg-white dark:bg-neutral-800 text-xs py-0.5 outline-none focus:ring-1 focus:ring-indigo-500 transition"
+        title="הקלד מספר ולחץ Enter לשמירת המיקום"
+      />
+    </div>
+  );
+}
+
 function SectionCard({
   title,
   subtitle,
@@ -1463,5 +1557,3 @@ function ChevronDownIcon(props: { className?: string }) {
   );
 }
 // ===== End Section 6 =====
-
-// we will need to split this script into components and hooks, but for the sake of this exercise, I kept everything in one file for easier reading and context understanding.

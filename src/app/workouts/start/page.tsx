@@ -68,6 +68,8 @@ const isCardioCheck = (name: string) => {
 
 
 
+// src/app/workouts/start/page.tsx
+
 // ===== Section 3 — StartWorkoutPage =====
 export default function StartWorkoutPage() {
   const router = useRouter();
@@ -106,7 +108,7 @@ export default function StartWorkoutPage() {
   const [finishedWe, setFinishedWe] = useState<Record<number, boolean>>({});
   const [activeWeId, setActiveWeId] = useState<number | null>(null); // last exercise we added a set to
 
-  // Mobile UX State: Active exercise index (using order_index instead of ID for stability)
+  // Mobile UX State: Active exercise index (using array index for maximum stability)
   const [mobileActiveIndex, setMobileActiveIndex] = useState<number | null>(null);
 
   // Body Scroll Lock for Mobile Modal
@@ -402,10 +404,10 @@ export default function StartWorkoutPage() {
 
       const { data: rows, error } = await supabase
         .from('user_tab_equipment')
-        .select('equipment_id, selected_at, equipment:equipment_id ( id, name_en, name_he, image_url, video_url )')
+        .select('equipment_id, order_index, equipment:equipment_id ( id, name_en, name_he, image_url, video_url )')
         .eq('user_id', userId)
         .eq('tab_id', chosenTabId)
-        .order('selected_at', { ascending: true });
+        .order('order_index', { ascending: true });
 
       if (error) { setError(error.message); setExercises([]); return; }
 
@@ -413,7 +415,7 @@ export default function StartWorkoutPage() {
         .map((r: any, i: number) => ({
           id: 0,
           equipment_id: r.equipment?.id ?? r.equipment_id,
-          order_index: i,
+          order_index: r.order_index ?? i,
           equip: {
             id: r.equipment?.id ?? r.equipment_id,
             name_en: r.equipment?.name_en ?? null,
@@ -754,8 +756,8 @@ export default function StartWorkoutPage() {
 
   if (loading) return <p className="opacity-70">טוען…</p>;
 
-  // Use order_index instead of id to find active exercise (stable across startWorkout)
-  const activeMobileEx = exercises.find(e => e.order_index === mobileActiveIndex);
+  // Use array index to find active exercise (stable across startWorkout since array order doesn't change)
+  const activeMobileEx = mobileActiveIndex !== null ? exercises[mobileActiveIndex] : null;
   
   // Calculate specific equipment type for mobile modal layout adjustments
   const isCardio = activeMobileEx ? isCardioCheck(activeMobileEx.equip.name_en || activeMobileEx.equip.name_he || '') : false;
@@ -911,12 +913,12 @@ export default function StartWorkoutPage() {
 
       {/* ===== MOBILE: Compact Grid of Images ===== */}
       <div className="md:hidden grid grid-cols-2 gap-3">
-         {exercises.map(ex => (
+         {exercises.map((ex, idx) => (
             <button 
-               key={ex.id || `mobile-ex-${ex.order_index}`}
-               // Use order_index instead of potentially 0-id for selection
+               key={ex.id ? `mobile-we-${ex.id}` : `mobile-plan-${ex.equipment_id}-${idx}`}
+               // Use array index instead of potentially 0-id for safe selection
                onClick={() => {
-                   setMobileActiveIndex(ex.order_index);
+                   setMobileActiveIndex(idx);
                    registerActivity(); // Tracking interaction
                }}
                className={`relative aspect-[4/3] rounded-xl overflow-hidden border transition-all ${finishedWe[ex.id] ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-black/10 dark:border-white/10'}`}
@@ -1181,7 +1183,7 @@ export default function StartWorkoutPage() {
 
       {/* ===== DESKTOP: Existing List View (Hidden on mobile) ===== */}
       <div className="hidden md:grid md:grid-cols-2 gap-5">
-        {exercises.map((ex) => {
+        {exercises.map((ex, idx) => {
           const weId = ex.id;
           const equipId = ex.equipment_id;
           const form = newSetByEx[weId] || { weight: '', reps: '', distance: '' };
@@ -1189,7 +1191,7 @@ export default function StartWorkoutPage() {
 
           return (
             <article
-              key={`${equipId}-${ex.order_index}`}
+              key={ex.id ? `desktop-we-${ex.id}` : `desktop-plan-${equipId}-${idx}`}
               className="rounded-xl ring-1 ring-black/10 dark:ring-white/10 overflow-hidden bg-background flex flex-col"
             >
               {/* Card header (green when finished AFTER moving on) */}
@@ -1476,10 +1478,6 @@ export default function StartWorkoutPage() {
   );
 }
 // ===== End Section 3 =====
-
-
-
-
 
 
 
