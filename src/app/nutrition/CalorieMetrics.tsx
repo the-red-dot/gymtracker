@@ -1,5 +1,4 @@
 // src/app/nutrition/CalorieMetrics.tsx
-
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -19,6 +18,7 @@ export type DayAgg = {
 
 type Gender = 'male' | 'female' | 'other' | 'unspecified';
 type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'very_active';
+
 type Profile = {
   user_id: string;
   gender: Gender | null;
@@ -28,6 +28,7 @@ type Profile = {
   age_years?: number | null;
   date_of_birth?: string | null;
 };
+
 type UserGoal = { id: number; goal_key: string; label: string };
 
 type LatestMeasurement = {
@@ -43,6 +44,7 @@ type LatestMeasurement = {
 
 /* --- Helper: Navy Method Logic --- */
 const log10 = (x: number) => Math.log(x) / Math.LN10;
+
 const toNum = (v: unknown): number | null => {
   if (v == null || v === '') return null;
   const n = Number(v);
@@ -100,6 +102,7 @@ export default function CalorieMetrics({
   todayTotals: Totals;
   last7: DayAgg[];
 }) {
+
   /* ---------- 1. טעינת מדידה אחרונה ---------- */
   const [latest, setLatest] = useState<LatestMeasurement>({ 
     weightKg: null, bodyFatPercent: null, measuredAt: null,
@@ -239,6 +242,7 @@ export default function CalorieMetrics({
   const [loadingPct, setLoadingPct] = useState<boolean>(true);
   const [savingPct, setSavingPct] = useState<'idle' | 'saving' | 'error'>('idle');
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const currentUserId = profile?.user_id;
 
   useEffect(() => {
@@ -321,6 +325,7 @@ export default function CalorieMetrics({
     (async () => {
       try {
         const fallback = getOptimalGpkForPct(pct, hasBf ? (bf as number) : null);
+        
         let uid: string | undefined = profile?.user_id;
         if (!uid) {
           const { data } = await supabase.auth.getSession();
@@ -335,6 +340,7 @@ export default function CalorieMetrics({
           .maybeSingle();
 
         if (ignore) return;
+
         if (!error && data && Number.isFinite(Number(data.grams_per_kg))) {
           const val = Number(data.grams_per_kg);
           setGpk(val);
@@ -778,6 +784,25 @@ export default function CalorieMetrics({
              );
           })}
         </div>
+
+        {/* NEW EXTENSION: Additional Macros Charts */}
+        <details className="group mt-6 bg-white/50 dark:bg-black/20 rounded-xl ring-1 ring-black/5 dark:ring-white/5 shadow-sm overflow-hidden transition-all">
+          <summary className="p-3 flex items-center justify-between cursor-pointer font-semibold text-sm select-none hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+            <div className="flex items-center gap-2">
+              <span className="opacity-70">📊</span>
+              מדדים שבועיים נוספים (חלבון, פחמימות, שומן)
+            </div>
+            <span className="transition-transform group-open:rotate-180 opacity-50">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+            </span>
+          </summary>
+          <div className="p-4 pt-0">
+            <WeeklyMacroChart title="צריכת חלבון" data={last7} target={macroTargets?.protein_g} dataKey="protein_g" colorClass="bg-blue-500 dark:bg-blue-500/80" />
+            <WeeklyMacroChart title="צריכת פחמימות" data={last7} target={macroTargets?.carbs_g} dataKey="carbs_g" colorClass="bg-emerald-500 dark:bg-emerald-500/80" />
+            <WeeklyMacroChart title="צריכת שומנים" data={last7} target={macroTargets?.fat_g} dataKey="fat_g" colorClass="bg-amber-500 dark:bg-amber-500/80" />
+          </div>
+        </details>
+
       </div>
     </div>
   );
@@ -928,4 +953,55 @@ function getOptimalGpkForPct(pct: number, bfPercent: number | null) {
   const scaled = minGpk + (pct / 30) * (maxGpk - minGpk);
   
   return Math.round(Math.min(maxGpk, Math.max(minGpk, scaled)) * 10) / 10;
+}
+
+function WeeklyMacroChart({
+  title,
+  data,
+  target,
+  dataKey,
+  colorClass,
+  unit = 'g'
+}: {
+  title: string;
+  data: DayAgg[];
+  target: number | undefined;
+  dataKey: 'protein_g' | 'carbs_g' | 'fat_g';
+  colorClass: string;
+  unit?: string;
+}) {
+  const avg = data.length > 0 ? round2(data.reduce((s, d) => s + (d.totals[dataKey] ?? 0), 0) / data.length) : 0;
+
+  return (
+    <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5">
+      <h4 className="font-bold text-sm mb-3 flex justify-between items-center text-gray-800 dark:text-gray-200">
+        <span>{title}</span>
+        <span className="text-xs bg-white dark:bg-black/20 px-2 py-1 rounded-md shadow-sm border border-black/5 dark:border-white/5">
+          ממוצע: {avg}{unit} <span className="opacity-50 font-normal">/ {target ? round2(target) : '-'}{unit}</span>
+        </span>
+      </h4>
+      <div className="flex justify-between items-end h-24 gap-1.5 md:gap-3">
+         {data.slice().reverse().map((d) => {
+            const val = d.totals[dataKey] ?? 0;
+            const hPct = target && target > 0 ? Math.min(100, Math.max(5, (val / target) * 100)) : 50;
+            return (
+              <div key={d.dayKey} className="flex flex-col items-center gap-1.5 w-full group relative flex-1 h-full justify-end">
+                 <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-7 bg-black/80 text-white text-[10px] py-1 px-2 rounded pointer-events-none whitespace-nowrap z-10">
+                  {round2(val)}{unit}
+                 </div>
+                 <div className="w-full max-w-[28px] bg-gray-100 dark:bg-neutral-700/50 rounded-t-lg relative flex items-end justify-center h-[calc(100%-16px)]">
+                   <div
+                      className={`w-full rounded-t-lg transition-all duration-500 ease-out ${colorClass}`}
+                      style={{ height: `${hPct}%` }}
+                   />
+                </div>
+                <span className="text-[9px] opacity-60 font-medium font-mono tracking-tighter">
+                  {d.dayKey.split('-').slice(1).reverse().join('/')}
+                </span>
+              </div>
+            );
+         })}
+      </div>
+    </div>
+  );
 }
